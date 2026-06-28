@@ -472,14 +472,6 @@ def main() -> None:
                             label_visibility="collapsed",
                             placeholder="0.00",
                         )
-                        # Format the input to always show 2 decimal places
-                        if amount_value:
-                            try:
-                                formatted = f"{float(amount_value):.2f}"
-                                if amount_value != formatted:
-                                    st.session_state[amount_key] = formatted
-                            except (ValueError, TypeError):
-                                pass
                     period_entries.append({"bill": bill_name, "amount": parse_numeric_text(amount_value)})
 
             edited_period = pd.DataFrame(period_entries, columns=["bill", "amount"])
@@ -497,14 +489,6 @@ def main() -> None:
                 key=cash_flow_key,
                 placeholder="0.00",
             )
-            # Format cash flow input to always show 2 decimal places
-            if period_cash_flow:
-                try:
-                    formatted = f"{float(period_cash_flow):.2f}"
-                    if period_cash_flow != formatted:
-                        st.session_state[cash_flow_key] = formatted
-                except (ValueError, TypeError):
-                    pass
             period_cash_flow_value = parse_numeric_text(period_cash_flow, allow_expression=True)
             st.session_state.cash_flow_by_period[period] = period_cash_flow_value
             period_remaining = period_cash_flow_value - period_total
