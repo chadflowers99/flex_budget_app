@@ -105,7 +105,7 @@ def load_cash_flow() -> dict[str, float]:
     return out
 
 
-def parse_numeric_text(value: str | float | int | None) -> float:
+def parse_numeric_text(value: str | float | int | None, allow_expression: bool = False) -> float:
     if value is None:
         return 0.0
     cleaned = str(value).replace("$", "").replace(",", "").strip()
@@ -114,6 +114,11 @@ def parse_numeric_text(value: str | float | int | None) -> float:
     try:
         return float(cleaned)
     except ValueError:
+        if allow_expression:
+            try:
+                return safe_eval_expression(cleaned)
+            except Exception:
+                return 0.0
         return 0.0
 
 
@@ -304,53 +309,20 @@ def safe_eval_expression(expr: str) -> float:
 
 def main() -> None:
     st.set_page_config(page_title="Flexible Budget", layout="wide")
-    st.markdown(
-        """
-        <style>
-        /* Native browser number spinners */
-        input[type=number]::-webkit-outer-spin-button,
-        input[type=number]::-webkit-inner-spin-button {
-            -webkit-appearance: none;
-            margin: 0;
-        }
-        input[type=number] {
-            -moz-appearance: textfield;
-            appearance: textfield;
-        }
-        /* Streamlit/BaseWeb stepper controls */
-        div[data-baseweb="input"] [data-testid="stNumberInputStepUp"],
-        div[data-baseweb="input"] [data-testid="stNumberInputStepDown"],
-        div[data-baseweb="input"] button[aria-label="Increment value"],
-        div[data-baseweb="input"] button[aria-label="Decrement value"],
-        div[data-baseweb="input"] button[title="Increment"],
-        div[data-baseweb="input"] button[title="Decrement"] {
-            display: none !important;
-            visibility: hidden !important;
-            width: 0 !important;
-            min-width: 0 !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            border: 0 !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
     header_col, calendar_col = st.columns([3, 2])
     with header_col:
         st.markdown(
             """
-            <div style='padding: 0.25rem 0 0.55rem 0; border-bottom: 2px solid rgba(46, 204, 113, 0.25);'>
-                <h1 style='margin: 0; line-height: 1.05; letter-spacing: 0.015em; font-weight: 400;'><span style='color: #2ecc71; font-family: "Courier New", monospace; font-size: 2rem; font-weight: 800;'>Portfolio</span><span style='color: #666666; font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; margin-left: 0.35em;'>brand</span></h1>
-                <div style='font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: #666666;'>
+            <div>
+                <h1 style='margin: 0; line-height: 1.05;'>Portfolio brand.</h1>
+                <div style='font-size: 0.72rem;'>
                     FLEXIBLE BUDGET PLANNER
                 </div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        st.caption("Shift bills between periods as due dates fluctuate and see totals update instantly.")
 
     with calendar_col:
         st.subheader("Calendar")
@@ -468,8 +440,11 @@ def main() -> None:
                 for bill_name in selected_bills:
                     amount_key = f"amount_input_{period}_{bill_name}"
                     st.session_state[amount_key] = "0.00"
+                cash_flow_key_reset = f"cash_flow_{period}"
+                st.session_state[cash_flow_key_reset] = "0.00"
+                st.session_state.cash_flow_by_period[period] = 0.0
                 st.session_state[pending_zero_key] = False
-                st.success(f"All selected bills in {period} set to 0.")
+                st.success(f"Amounts and cash flow cleared for {period}.")
 
             # Keep cache aligned with currently selected bills for this period.
             st.session_state.period_amount_cache[period] = {
@@ -514,7 +489,7 @@ def main() -> None:
                 key=cash_flow_key,
                 placeholder="0.00",
             )
-            period_cash_flow_value = parse_numeric_text(period_cash_flow)
+            period_cash_flow_value = parse_numeric_text(period_cash_flow, allow_expression=True)
             st.session_state.cash_flow_by_period[period] = period_cash_flow_value
             period_remaining = period_cash_flow_value - period_total
             total_col, net_col = st.columns(2)
@@ -530,14 +505,14 @@ def main() -> None:
 
             action_col1, action_col2 = st.columns(2)
             with action_col1:
-                if st.button(f"Set all {period} bills to 0", key=f"zero_all_{period}"):
+                if st.button("Refresh amounts", key=f"zero_all_{period}"):
                     st.session_state[pending_zero_key] = True
                     st.rerun()
 
             with action_col2:
                 snapshot_csv = build_weekly_snapshot_csv(period, cleaned_period[["bill", "amount"]], period_cash_flow_value, period_remaining)
                 st.download_button(
-                    label=f"Download {period} snapshot CSV",
+                    label="Snapshot CSV",
                     data=snapshot_csv.encode("utf-8"),
                     file_name=f"{period}_snapshot.csv",
                     mime="text/csv",
@@ -556,19 +531,6 @@ def main() -> None:
     persist_state(st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
 
     st.session_state.periods_order = WEEK_PERIODS.copy()
-
-    st.subheader("Calculator")
-    st.caption("Use quick arithmetic while planning your week.")
-    calc_expr = st.text_input("Expression", placeholder="(700 + 60 + 50) - 900")
-    if st.button("Calculate"):
-        if not calc_expr.strip():
-            st.warning("Enter an expression to calculate.")
-        else:
-            try:
-                calc_result = safe_eval_expression(calc_expr.strip())
-                st.success(f"Result: {calc_result:,.2f}")
-            except Exception as exc:
-                st.error(f"Invalid expression: {exc}")
 
 if __name__ == "__main__":
     main()
