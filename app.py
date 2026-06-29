@@ -2,18 +2,264 @@ from __future__ import annotations
 
 import ast
 import calendar
+import json
 import operator
+import tempfile
 from datetime import date
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from supabase import create_client, Client
+from supabase.client import ClientOptions
+
+# Load Supabase credentials from secrets.
+supabase_block = st.secrets.get("supabase", {})
+
+SUPABASE_URL = (
+    st.secrets.get("SUPABASE_URL")
+    or supabase_block.get("SUPABASE_URL")
+    or supabase_block.get("url")
+)
+SUPABASE_ANON_KEY = (
+    st.secrets.get("SUPABASE_ANON_KEY")
+    or st.secrets.get("SUPABASE_KEY")
+    or supabase_block.get("SUPABASE_ANON_KEY")
+    or supabase_block.get("SUPABASE_KEY")
+    or supabase_block.get("anon_key")
+)
+
+if isinstance(SUPABASE_URL, str):
+    SUPABASE_URL = SUPABASE_URL.strip()
+if isinstance(SUPABASE_ANON_KEY, str):
+    SUPABASE_ANON_KEY = SUPABASE_ANON_KEY.strip()
+
+if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+    st.error(
+        "Missing SUPABASE_URL and/or Supabase key in secrets. "
+        "Expected SUPABASE_ANON_KEY (preferred) or SUPABASE_KEY (legacy)."
+    )
+    st.stop()
+
+if "sb_secret_" in SUPABASE_ANON_KEY.lower() or "service_role" in SUPABASE_ANON_KEY.lower():
+    st.error(
+        "SUPABASE_ANON_KEY appears to be a service-role/secret key. "
+        "Use the anon/publishable key from Supabase Settings > API."
+    )
+    st.stop()
+
+if "your-project" in SUPABASE_URL or "your-project-ref" in SUPABASE_URL:
+    st.error(
+        "SUPABASE_URL in .streamlit/secrets.toml is still a placeholder. "
+        "Use your real project URL from Supabase Settings > API."
+    )
+    st.stop()
+
+if "your_anon_key_here" in SUPABASE_ANON_KEY.lower():
+    st.error(
+        "SUPABASE_ANON_KEY in .streamlit/secrets.toml is still a placeholder. "
+        "Use your real anon/publishable key from Supabase Settings > API."
+    )
+    st.stop()
 
 
+BASE_DIR = Path(__file__).resolve().parent
+AUTH_STORAGE_FILE = BASE_DIR / ".streamlit" / "supabase_auth_storage.json"
+AUTH_STORAGE_FILE_FALLBACK = Path(tempfile.gettempdir()) / "flex_budget_app_supabase_auth_storage.json"
+
+
+class MemoryAuthStorage:
+    """In-memory auth storage fallback when filesystem is not writable."""
+    def __init__(self):
+        self._store = {}
+
+    def get_item(self, key):
+        return self._store.get(key)
+
+    def set_item(self, key, value):
+        self._store[key] = value
+
+    def remove_item(self, key):
+        self._store.pop(key, None)
+
+
+class FileAuthStorage:
+    """File-backed auth storage — required for PKCE verifier across redirects."""
+    def __init__(self, storage_file):
+        self.storage_file = storage_file
+
+    def _read(self):
+        if not self.storage_file.exists():
+            return {}
+        try:
+            return json.loads(self.storage_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _write(self, data):
+        self.storage_file.parent.mkdir(parents=True, exist_ok=True)
+        self.storage_file.write_text(json.dumps(data), encoding="utf-8")
+
+    def get_item(self, key):
+        return self._read().get(key)
+
+    def set_item(self, key, value):
+        data = self._read()
+        data[key] = value
+        self._write(data)
+
+    def remove_item(self, key):
+        data = self._read()
+        data.pop(key, None)
+        self._write(data)
+
+
+def _is_writable(path: Path) -> bool:
+    """Checks whether a path is writable by creating/removing a tiny probe file."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        probe = path.parent / ".write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+def _build_auth_storage():
+    """Use file-backed storage when possible to preserve PKCE verifier on callback."""
+    if _is_writable(AUTH_STORAGE_FILE):
+        return FileAuthStorage(AUTH_STORAGE_FILE)
+    if _is_writable(AUTH_STORAGE_FILE_FALLBACK):
+        return FileAuthStorage(AUTH_STORAGE_FILE_FALLBACK)
+    return MemoryAuthStorage()
+
+
+# Initialize Supabase client with appropriate storage backend.
+@st.cache_resource
+def get_supabase_client() -> Client:
+    storage = _build_auth_storage()
+    return create_client(
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY,
+        options=ClientOptions(
+            flow_type="pkce",
+            storage=storage,
+        ),
+    )
+
+
+supabase: Client = get_supabase_client()
+
+# Legacy paths (no longer used, but kept for reference)
 APP_DIR = Path(__file__).parent
 BILLS_PATH = APP_DIR / "bills.csv"
 CATALOG_PATH = APP_DIR / "bill_catalog.csv"
 CASHFLOW_PATH = APP_DIR / "cash_flow.csv"
+
+
+def auth_ui():
+    """Displays login/signup UI and manages authentication state."""
+    if "user" not in st.session_state:
+        st.session_state.user = None
+
+    if st.session_state.user:
+        return st.session_state.user
+
+    # Restore session from file-backed storage after page refresh
+    if not st.session_state.user:
+        try:
+            existing = supabase.auth.get_session()
+            if existing and existing.user:
+                st.session_state.user = existing.user
+                st.session_state.access_token = existing.access_token
+                return st.session_state.user
+        except Exception:
+            pass
+
+    oauth_error = st.query_params.get("error")
+    oauth_error_description = st.query_params.get("error_description")
+    if oauth_error:
+        st.error(
+            f"Login attempt failed: {oauth_error}"
+            + (f" ({oauth_error_description})" if oauth_error_description else "")
+        )
+        st.query_params.clear()
+
+    # Handle OAuth callback from Supabase (PKCE flow).
+    auth_code = st.query_params.get("code")
+    if auth_code:
+        try:
+            response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
+            if response and response.user:
+                st.session_state.user = response.user
+                st.session_state.access_token = response.session.access_token if response.session else None
+                st.query_params.clear()
+                st.rerun()
+            else:
+                st.error("Login attempt failed: no user returned from Supabase callback.")
+                st.query_params.clear()
+        except Exception as e:
+            st.error(f"Login attempt failed: {str(e)}")
+            st.query_params.clear()
+
+    st.markdown("### Authentication")
+    auth_tab1, auth_tab2, auth_tab3 = st.tabs(["Login", "Sign Up", "Google"])
+
+    with auth_tab1:
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_password")
+
+        if st.button("Log In", key="login_button"):
+            try:
+                response = supabase.auth.sign_in_with_password(
+                    {
+                        "email": email,
+                        "password": password,
+                    }
+                )
+                st.session_state.user = response.user
+                st.session_state.access_token = response.session.access_token
+                st.rerun()
+            except Exception as e:
+                st.error(f"Login attempt failed: {str(e)}")
+
+    with auth_tab2:
+        email = st.text_input("Email", key="signup_email")
+        password = st.text_input("Password", type="password", key="signup_password")
+
+        if st.button("Sign Up", key="signup_button"):
+            try:
+                response = supabase.auth.sign_up(
+                    {
+                        "email": email,
+                        "password": password,
+                    }
+                )
+                st.session_state.user = response.user
+                if response.session:
+                    st.session_state.access_token = response.session.access_token
+                st.success("Account created! Log in with your credentials.")
+            except Exception as e:
+                st.error(f"Sign up failed: {str(e)}")
+
+    with auth_tab3:
+        if st.button("Sign in with Google", key="google_button"):
+            try:
+                response = supabase.auth.sign_in_with_oauth(
+                    {
+                        "provider": "google",
+                        "options": {
+                            "redirect_to": st.query_params.get("redirect_to", f"{st.config.client.baseURL}"),
+                        },
+                    }
+                )
+                if response.url:
+                    st.markdown(f"[Open login link]({response.url})")
+            except Exception as e:
+                st.error(f"Google login failed: {str(e)}")
+
+    return None
 WEEK_PERIODS = ["wk1", "wk2", "wk3", "wk4", "wk5"]
 
 DEFAULT_BILLS = pd.DataFrame(
@@ -59,7 +305,75 @@ def normalize_period(value: str) -> str:
     return str(value).strip().lower()
 
 
+# Supabase load functions (replaces CSV loading)
+def load_bills_from_supabase(user_id: str) -> pd.DataFrame:
+    """Load bills from Supabase for the authenticated user."""
+    try:
+        response = supabase.table("bills").select("period, bill, amount").eq("user_id", user_id).execute()
+        if response.data:
+            return pd.DataFrame(response.data)[["period", "bill", "amount"]]
+        return pd.DataFrame(columns=["period", "bill", "amount"])
+    except Exception as e:
+        st.warning(f"Failed to load bills: {str(e)}")
+        return pd.DataFrame(columns=["period", "bill", "amount"])
+
+
+def load_bill_catalog_from_supabase(user_id: str) -> list[str]:
+    """Load available bills from Supabase for the authenticated user."""
+    try:
+        response = supabase.table("bill_catalog").select("bill").eq("user_id", user_id).execute()
+        if response.data:
+            return [row["bill"] for row in response.data if row["bill"]]
+        return []
+    except Exception as e:
+        st.warning(f"Failed to load bill catalog: {str(e)}")
+        return []
+
+
+def load_cash_flow_from_supabase(user_id: str) -> dict[str, float]:
+    """Load cash flow by period from Supabase for the authenticated user."""
+    defaults = {period: 0.0 for period in WEEK_PERIODS}
+    try:
+        response = supabase.table("cash_flow").select("period, cash_flow").eq("user_id", user_id).execute()
+        out = defaults.copy()
+        if response.data:
+            for row in response.data:
+                period = normalize_period(str(row["period"]))
+                if period in out:
+                    out[period] = float(row["cash_flow"] if row["cash_flow"] is not None else 0.0)
+        return out
+    except Exception as e:
+        st.warning(f"Failed to load cash flow: {str(e)}")
+        return defaults
+
+
+def persist_to_supabase(user_id: str, bills_df: pd.DataFrame, bill_catalog: list[str], cash_flow_by_period: dict[str, float]) -> None:
+    """Save all data to Supabase for the authenticated user."""
+    try:
+        # Upsert bills
+        if not bills_df.empty:
+            bills_list = bills_df.to_dict(orient="records")
+            for bill in bills_list:
+                bill["user_id"] = user_id
+            supabase.table("bills").upsert(bills_list, on_conflict="user_id,period,bill").execute()
+        
+        # Upsert bill catalog
+        if bill_catalog:
+            catalog_list = [{"user_id": user_id, "bill": bill} for bill in ensure_bill_catalog(bill_catalog)]
+            supabase.table("bill_catalog").upsert(catalog_list, on_conflict="user_id,bill").execute()
+        
+        # Upsert cash flow
+        cashflow_list = [
+            {"user_id": user_id, "period": period, "cash_flow": float(cash_flow_by_period.get(period, 0.0))}
+            for period in WEEK_PERIODS
+        ]
+        supabase.table("cash_flow").upsert(cashflow_list, on_conflict="user_id,period").execute()
+    except Exception as e:
+        st.error(f"Failed to save data: {str(e)}")
+
+
 def load_table(path: Path, default_df: pd.DataFrame) -> pd.DataFrame:
+    """Legacy function for backward compatibility."""
     if path.exists():
         df = pd.read_csv(path)
     else:
@@ -68,6 +382,7 @@ def load_table(path: Path, default_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_bill_catalog(default_values: list[str], bills_df: pd.DataFrame) -> list[str]:
+    """Legacy function for backward compatibility."""
     if CATALOG_PATH.exists():
         try:
             catalog_df = pd.read_csv(CATALOG_PATH)
@@ -82,6 +397,7 @@ def load_bill_catalog(default_values: list[str], bills_df: pd.DataFrame) -> list
 
 
 def load_cash_flow() -> dict[str, float]:
+    """Legacy function for backward compatibility."""
     defaults = {period: 0.0 for period in WEEK_PERIODS}
     if not CASHFLOW_PATH.exists():
         return defaults
@@ -309,6 +625,22 @@ def safe_eval_expression(expr: str) -> float:
 
 def main() -> None:
     st.set_page_config(page_title="Flexible Budget", layout="wide")
+    
+    # Authenticate user first
+    user = auth_ui()
+    if not user:
+        st.stop()
+    
+    user_id = user.id
+    
+    # Add logout button in sidebar
+    with st.sidebar:
+        if st.button("Logout"):
+            supabase.auth.sign_out()
+            st.session_state.user = None
+            st.session_state.access_token = None
+            st.rerun()
+        st.caption(f"Logged in as: {user.email}")
 
     header_col, calendar_col = st.columns([3, 2])
     with header_col:
@@ -370,17 +702,19 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
+    # Load data from Supabase or initialize session state
     if "bills" not in st.session_state:
-        st.session_state.bills = migrate_periods_to_weeks(clean_bills(load_table(BILLS_PATH, DEFAULT_BILLS)))
+        st.session_state.bills = migrate_periods_to_weeks(clean_bills(load_bills_from_supabase(user_id)))
     if "periods_order" not in st.session_state:
         st.session_state.periods_order = WEEK_PERIODS.copy()
     if "bill_catalog" not in st.session_state:
+        catalog_from_db = load_bill_catalog_from_supabase(user_id)
         base_catalog = DEFAULT_BILLS["bill"].astype(str).tolist()
-        st.session_state.bill_catalog = load_bill_catalog(base_catalog, st.session_state.bills)
+        st.session_state.bill_catalog = ensure_bill_catalog(catalog_from_db + base_catalog)
     if "period_amount_cache" not in st.session_state:
         st.session_state.period_amount_cache = build_period_amount_cache(st.session_state.bills)
     if "cash_flow_by_period" not in st.session_state:
-        st.session_state.cash_flow_by_period = load_cash_flow()
+        st.session_state.cash_flow_by_period = load_cash_flow_from_supabase(user_id)
 
     periods = WEEK_PERIODS.copy()
 
@@ -404,7 +738,7 @@ def main() -> None:
                 else:
                     st.session_state.bill_catalog = ensure_bill_catalog(st.session_state.bill_catalog + [candidate])
                     st.success(f"Added: {candidate}")
-                    persist_state(st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
+                    persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
                     st.rerun()
     
     with bill_tab2:
@@ -416,7 +750,7 @@ def main() -> None:
                 if bill_to_delete:
                     st.session_state.bill_catalog = [bill for bill in st.session_state.bill_catalog if bill != bill_to_delete]
                     st.success(f"Deleted: {bill_to_delete}")
-                    persist_state(st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
+                    persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
                     st.rerun()
                 else:
                     st.warning("Select a bill.")
@@ -547,7 +881,7 @@ def main() -> None:
     st.session_state.bill_catalog = ensure_bill_catalog(
         bill_catalog + st.session_state.bills["bill"].astype(str).tolist()
     )
-    persist_state(st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
+    persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
 
     st.session_state.periods_order = WEEK_PERIODS.copy()
 
