@@ -402,6 +402,19 @@ def main() -> None:
                 st.success(f"Added bill option: {candidate}")
                 persist_state(st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
                 st.rerun()
+
+    delete_col1, delete_col2 = st.columns([3, 1])
+    with delete_col1:
+        bill_to_delete = st.selectbox("Delete bill from dropdown", options=ensure_bill_catalog(st.session_state.bill_catalog), placeholder="Select a bill to delete")
+    with delete_col2:
+        if st.button("Delete bill option"):
+            if bill_to_delete:
+                st.session_state.bill_catalog = [bill for bill in st.session_state.bill_catalog if bill != bill_to_delete]
+                st.success(f"Deleted bill option: {bill_to_delete}")
+                persist_state(st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
+                st.rerun()
+            else:
+                st.warning("Select a bill to delete.")
     bill_catalog = ensure_bill_catalog(st.session_state.bill_catalog)
     if not bill_catalog:
         bill_catalog = ensure_bill_catalog(DEFAULT_BILLS["bill"].astype(str).tolist())
