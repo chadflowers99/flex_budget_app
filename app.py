@@ -387,34 +387,40 @@ def main() -> None:
     st.subheader("Bills by Period")
     st.caption("Select bills from the dropdown for each week, then edit amounts.")
 
-    catalog_col1, catalog_col2 = st.columns([3, 1])
-    with catalog_col1:
-        new_bill_name = st.text_input("Add bill to dropdown", placeholder="internet")
-    with catalog_col2:
-        if st.button("Add bill option"):
-            candidate = str(new_bill_name).strip()
-            if not candidate:
-                st.warning("Enter a bill name.")
-            elif candidate in st.session_state.bill_catalog:
-                st.info("Bill already exists in dropdown.")
-            else:
-                st.session_state.bill_catalog = ensure_bill_catalog(st.session_state.bill_catalog + [candidate])
-                st.success(f"Added bill option: {candidate}")
-                persist_state(st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
-                st.rerun()
-
-    delete_col1, delete_col2 = st.columns([3, 1])
-    with delete_col1:
-        bill_to_delete = st.selectbox("Delete bill from dropdown", options=ensure_bill_catalog(st.session_state.bill_catalog), placeholder="Select a bill to delete")
-    with delete_col2:
-        if st.button("Delete bill option"):
-            if bill_to_delete:
-                st.session_state.bill_catalog = [bill for bill in st.session_state.bill_catalog if bill != bill_to_delete]
-                st.success(f"Deleted bill option: {bill_to_delete}")
-                persist_state(st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
-                st.rerun()
-            else:
-                st.warning("Select a bill to delete.")
+    # Bill management tabs
+    bill_tab1, bill_tab2 = st.tabs(["Add bill", "Delete bill"])
+    
+    with bill_tab1:
+        add_col1, add_col2 = st.columns([3, 1])
+        with add_col1:
+            new_bill_name = st.text_input("Bill name", placeholder="internet", label_visibility="collapsed")
+        with add_col2:
+            if st.button("Add", key="add_bill_btn"):
+                candidate = str(new_bill_name).strip()
+                if not candidate:
+                    st.warning("Enter a bill name.")
+                elif candidate in st.session_state.bill_catalog:
+                    st.info("Already exists.")
+                else:
+                    st.session_state.bill_catalog = ensure_bill_catalog(st.session_state.bill_catalog + [candidate])
+                    st.success(f"Added: {candidate}")
+                    persist_state(st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
+                    st.rerun()
+    
+    with bill_tab2:
+        delete_col1, delete_col2 = st.columns([3, 1])
+        with delete_col1:
+            bill_to_delete = st.selectbox("Select bill", options=ensure_bill_catalog(st.session_state.bill_catalog), placeholder="Choose bill", label_visibility="collapsed")
+        with delete_col2:
+            if st.button("Delete", key="delete_bill_btn"):
+                if bill_to_delete:
+                    st.session_state.bill_catalog = [bill for bill in st.session_state.bill_catalog if bill != bill_to_delete]
+                    st.success(f"Deleted: {bill_to_delete}")
+                    persist_state(st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
+                    st.rerun()
+                else:
+                    st.warning("Select a bill.")
+    
     bill_catalog = ensure_bill_catalog(st.session_state.bill_catalog)
     if not bill_catalog:
         bill_catalog = ensure_bill_catalog(DEFAULT_BILLS["bill"].astype(str).tolist())
