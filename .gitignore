@@ -1,0 +1,10 @@
+.streamlit/secrets.toml
+__pycache__/
+.vscode/
+*.pyc
+.DS_Store
+bills.csv
+bill_catalog.csv
+cash_flow.csv
+input/
+output/
