@@ -218,74 +218,72 @@ def auth_ui():
         """,
         unsafe_allow_html=True,
     )
-    
-    # Constrain auth form width
+
+    # Create a centered auth form with fixed max width
     st.markdown(
         """
-        <style>
-        [data-testid="stVerticalBlock"] > [data-testid="column"]:first-child { width: 0% !important; }
-        [data-testid="stVerticalBlock"] > [data-testid="column"]:last-child { width: 0% !important; }
-        </style>
+        <div style="display: flex; justify-content: center;">
+        <div style="width: 100%; max-width: 400px;">
         """,
         unsafe_allow_html=True,
     )
+    
+    st.markdown("### Authentication")
+    auth_tab1, auth_tab2, auth_tab3 = st.tabs(["Login", "Sign Up", "Google"])
 
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        st.markdown("### Authentication")
-        auth_tab1, auth_tab2, auth_tab3 = st.tabs(["Login", "Sign Up", "Google"])
+    with auth_tab1:
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_password")
 
-        with auth_tab1:
-            email = st.text_input("Email", key="login_email")
-            password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Log In", key="login_button", use_container_width=True):
+            try:
+                response = supabase.auth.sign_in_with_password(
+                    {
+                        "email": email,
+                        "password": password,
+                    }
+                )
+                st.session_state.user = response.user
+                st.session_state.access_token = response.session.access_token
+                st.rerun()
+            except Exception as e:
+                st.error(f"Login attempt failed: {str(e)}")
 
-            if st.button("Log In", key="login_button", use_container_width=True):
-                try:
-                    response = supabase.auth.sign_in_with_password(
-                        {
-                            "email": email,
-                            "password": password,
-                        }
-                    )
-                    st.session_state.user = response.user
+    with auth_tab2:
+        email = st.text_input("Email", key="signup_email")
+        password = st.text_input("Password", type="password", key="signup_password")
+
+        if st.button("Sign Up", key="signup_button", use_container_width=True):
+            try:
+                response = supabase.auth.sign_up(
+                    {
+                        "email": email,
+                        "password": password,
+                    }
+                )
+                st.session_state.user = response.user
+                if response.session:
                     st.session_state.access_token = response.session.access_token
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Login attempt failed: {str(e)}")
+                st.success("Account created! Log in with your credentials.")
+            except Exception as e:
+                st.error(f"Sign up failed: {str(e)}")
 
-        with auth_tab2:
-            email = st.text_input("Email", key="signup_email")
-            password = st.text_input("Password", type="password", key="signup_password")
+    with auth_tab3:
+        if st.button("Sign In with Google", key="google_button", use_container_width=True):
+            try:
+                response = supabase.auth.sign_in_with_oauth(
+                    {
+                        "provider": "google",
+                    }
+                )
+                if response and response.url:
+                    st.markdown(f'<a href="{response.url}" target="_self">Click here to sign in with Google</a>', unsafe_allow_html=True)
+                else:
+                    st.error("Could not initiate Google sign in")
+            except Exception as e:
+                st.error(f"Google sign in failed: {str(e)}")
 
-            if st.button("Sign Up", key="signup_button", use_container_width=True):
-                try:
-                    response = supabase.auth.sign_up(
-                        {
-                            "email": email,
-                            "password": password,
-                        }
-                    )
-                    st.session_state.user = response.user
-                    if response.session:
-                        st.session_state.access_token = response.session.access_token
-                    st.success("Account created! Log in with your credentials.")
-                except Exception as e:
-                    st.error(f"Sign up failed: {str(e)}")
-
-        with auth_tab3:
-            if st.button("Sign In with Google", key="google_button", use_container_width=True):
-                try:
-                    response = supabase.auth.sign_in_with_oauth(
-                        {
-                            "provider": "google",
-                        }
-                    )
-                    if response and response.url:
-                        st.markdown(f'<a href="{response.url}" target="_self">Click here to sign in with Google</a>', unsafe_allow_html=True)
-                    else:
-                        st.error("Could not initiate Google sign in")
-                except Exception as e:
-                    st.error(f"Google sign in failed: {str(e)}")
+    st.markdown("</div></div>", unsafe_allow_html=True)
 
     return None
 WEEK_PERIODS = ["wk1", "wk2", "wk3", "wk4", "wk5"]
