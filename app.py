@@ -269,12 +269,10 @@ def auth_ui():
                             "provider": "google",
                         }
                     )
-                    if response and response.url:
-                        st.markdown(f'<a href="{response.url}" target="_self">Click here to sign in with Google</a>', unsafe_allow_html=True)
-                    else:
-                        st.error("Could not initiate Google sign in")
+                    if response and hasattr(response, 'url') and response.url:
+                        st.markdown(f'<a href="{response.url}" target="_self" style="text-decoration: none;">📲 Redirecting to Google Sign In...</a>', unsafe_allow_html=True)
                 except Exception as e:
-                    st.error(f"Google sign in failed: {str(e)}")
+                    st.error(f"Google sign in error: {str(e)}")
 
     return None
 WEEK_PERIODS = ["wk1", "wk2", "wk3", "wk4", "wk5"]
