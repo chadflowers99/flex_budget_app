@@ -274,23 +274,26 @@ def auth_ui():
                     st.error(f"Sign up failed: {str(e)}")
 
         with auth_tab3:
-            if st.button("Sign In with Google", key="google_button", use_container_width=True):
-                try:
+            st.info("Click the button below to sign in with Google")
+            try:
+                # Generate OAuth URL without clicking button - cache it
+                @st.cache_data(ttl=60)
+                def get_google_oauth_url():
                     response = supabase.auth.sign_in_with_oauth(
                         {
                             "provider": "google",
-                            "options": {
-                                "redirect_to": "https://pb-budget.streamlit.app"
-                            }
+                            "options": {"redirect_to": "https://pb-budget.streamlit.app"}
                         }
                     )
-                    if response and hasattr(response, 'url') and response.url:
-                        st.markdown(
-                            f'[Click here to log in if you are not redirected automatically]({response.url})',
-                            unsafe_allow_html=False
-                        )
-                except Exception as e:
-                    st.error(f"Google sign in error: {str(e)}")
+                    return response.url if (response and hasattr(response, 'url')) else None
+                
+                oauth_url = get_google_oauth_url()
+                if oauth_url:
+                    st.link_button("Sign In with Google", oauth_url, use_container_width=True)
+                else:
+                    st.error("Could not generate Google sign-in URL")
+            except Exception as e:
+                st.error(f"Google sign in error: {str(e)}")
 
     return None
 WEEK_PERIODS = ["wk1", "wk2", "wk3", "wk4", "wk5"]
