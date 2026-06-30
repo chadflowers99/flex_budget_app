@@ -88,21 +88,33 @@ class MemoryAuthStorage:
 
 
 class FileAuthStorage:
-    """File-backed auth storage — required for PKCE verifier across redirects."""
+    """File-backed auth storage with session_state fallback for Streamlit Cloud."""
     def __init__(self, storage_file):
         self.storage_file = storage_file
 
     def _read(self):
+        # Try session_state first (fastest, survives reruns)
+        if "_supabase_auth_store" in st.session_state:
+            return st.session_state._supabase_auth_store
+        # Fall back to file
         if not self.storage_file.exists():
             return {}
         try:
-            return json.loads(self.storage_file.read_text(encoding="utf-8"))
+            data = json.loads(self.storage_file.read_text(encoding="utf-8"))
+            st.session_state._supabase_auth_store = data
+            return data
         except (OSError, json.JSONDecodeError):
             return {}
 
     def _write(self, data):
-        self.storage_file.parent.mkdir(parents=True, exist_ok=True)
-        self.storage_file.write_text(json.dumps(data), encoding="utf-8")
+        # Always write to session_state (fastest)
+        st.session_state._supabase_auth_store = data
+        # Also write to file if possible
+        try:
+            self.storage_file.parent.mkdir(parents=True, exist_ok=True)
+            self.storage_file.write_text(json.dumps(data), encoding="utf-8")
+        except OSError:
+            pass  # File write failed, but session_state has it
 
     def get_item(self, key):
         return self._read().get(key)
