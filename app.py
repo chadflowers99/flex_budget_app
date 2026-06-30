@@ -208,37 +208,31 @@ def auth_ui():
             st.query_params.clear()
 
     st.markdown("### Authentication")
-    auth_tab1, auth_tab2 = st.tabs(["Login", "Sign Up"])
+    col1, col2 = st.columns(2)
 
-    with auth_tab1:
-        email = st.text_input("Email", key="login_email")
-        password = st.text_input("Password", type="password", key="login_password")
-
-        if st.button("Log In", key="login_button"):
+    with col1:
+        st.markdown("**Login**")
+        login_email = st.text_input("Email", key="login_email")
+        login_password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Log In", key="login_button", use_container_width=True):
             try:
                 response = supabase.auth.sign_in_with_password(
-                    {
-                        "email": email,
-                        "password": password,
-                    }
+                    {"email": login_email, "password": login_password}
                 )
                 st.session_state.user = response.user
                 st.session_state.access_token = response.session.access_token
                 st.rerun()
             except Exception as e:
-                st.error(f"Login attempt failed: {str(e)}")
+                st.error(f"Login failed: {str(e)}")
 
-    with auth_tab2:
-        email = st.text_input("Email", key="signup_email")
-        password = st.text_input("Password", type="password", key="signup_password")
-
-        if st.button("Sign Up", key="signup_button"):
+    with col2:
+        st.markdown("**Sign Up**")
+        signup_email = st.text_input("Email", key="signup_email")
+        signup_password = st.text_input("Password", type="password", key="signup_password")
+        if st.button("Sign Up", key="signup_button", use_container_width=True):
             try:
                 response = supabase.auth.sign_up(
-                    {
-                        "email": email,
-                        "password": password,
-                    }
+                    {"email": signup_email, "password": signup_password}
                 )
                 st.session_state.user = response.user
                 if response.session:
