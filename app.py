@@ -207,21 +207,21 @@ def auth_ui():
             st.error(f"Login attempt failed: {str(e)}")
             st.query_params.clear()
 
-    st.markdown(
-        """
-        <div style="text-align: center;">
-            <h1>Portfolio brand.</h1>
-            <div style="font-size: 18px; margin-bottom: 30px;">
-                FLEXIBLE BUDGET LOG
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
     with st.container():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
+            st.markdown(
+                """
+                <div style="text-align: center;">
+                    <h1>Portfolio brand.</h1>
+                    <div style="font-size: 18px; margin-bottom: 30px;">
+                        FLEXIBLE BUDGET LOG
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            
             st.markdown("### Authentication")
             auth_tab1, auth_tab2 = st.tabs(["Login", "Sign Up"])
 
