@@ -215,13 +215,16 @@ def auth_ui():
                 # Set the session on the Supabase client so RLS works
                 if response.session:
                     supabase.auth.set_session(response.session.access_token, response.session.refresh_token)
+                st.session_state.pop("oauth_url", None)
                 st.query_params.clear()
                 st.rerun()
             else:
                 st.error("Login attempt failed: no user returned from Supabase callback.")
+                st.session_state.pop("oauth_url", None)
                 st.query_params.clear()
         except Exception as e:
             st.error(f"Login attempt failed: {str(e)}")
+            st.session_state.pop("oauth_url", None)
             st.query_params.clear()
 
     st.markdown(
@@ -286,20 +289,25 @@ def auth_ui():
             # Skip button rendering during callback (callback handler processes it above)
             if not (st.query_params.get("code") or st.query_params.get("error")):
                 st.info("Click the button below to sign in with Google")
-                try:
-                    response = supabase.auth.sign_in_with_oauth(
-                        {
-                            "provider": "google",
-                            "options": {"redirect_to": "https://pb-budget.streamlit.app"}
-                        }
-                    )
-                    oauth_url = response.url if (response and hasattr(response, 'url')) else None
-                    if oauth_url:
-                        st.link_button("Sign In with Google", oauth_url, use_container_width=True)
-                    else:
-                        st.error("Could not generate Google sign-in URL")
-                except Exception as e:
-                    st.error(f"Google sign in error: {str(e)}")
+                
+                # Cache the OAuth URL to avoid regenerating the PKCE verifier on each render
+                if "oauth_url" not in st.session_state:
+                    try:
+                        response = supabase.auth.sign_in_with_oauth(
+                            {
+                                "provider": "google",
+                                "options": {"redirect_to": "https://pb-budget.streamlit.app"}
+                            }
+                        )
+                        st.session_state.oauth_url = response.url if (response and hasattr(response, 'url')) else None
+                    except Exception as e:
+                        st.error(f"Google sign in error: {str(e)}")
+                
+                oauth_url = st.session_state.get("oauth_url")
+                if oauth_url:
+                    st.link_button("Sign In with Google", oauth_url, use_container_width=True)
+                else:
+                    st.error("Could not generate Google sign-in URL")
 
     return None
 WEEK_PERIODS = ["wk1", "wk2", "wk3", "wk4", "wk5"]
@@ -679,6 +687,7 @@ def main() -> None:
             supabase.auth.sign_out()
             st.session_state.user = None
             st.session_state.access_token = None
+            st.session_state.pop("oauth_url", None)
             st.rerun()
         st.caption(f"Logged in as: {user.email}")
 
