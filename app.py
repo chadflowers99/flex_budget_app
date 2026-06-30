@@ -276,18 +276,13 @@ def auth_ui():
         with auth_tab3:
             st.info("Click the button below to sign in with Google")
             try:
-                # Generate OAuth URL without clicking button - cache it
-                @st.cache_data(ttl=60)
-                def get_google_oauth_url():
-                    response = supabase.auth.sign_in_with_oauth(
-                        {
-                            "provider": "google",
-                            "options": {"redirect_to": "https://pb-budget.streamlit.app"}
-                        }
-                    )
-                    return response.url if (response and hasattr(response, 'url')) else None
-                
-                oauth_url = get_google_oauth_url()
+                response = supabase.auth.sign_in_with_oauth(
+                    {
+                        "provider": "google",
+                        "options": {"redirect_to": "https://pb-budget.streamlit.app"}
+                    }
+                )
+                oauth_url = response.url if (response and hasattr(response, 'url')) else None
                 if oauth_url:
                     st.link_button("Sign In with Google", oauth_url, use_container_width=True)
                 else:
