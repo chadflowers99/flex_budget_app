@@ -219,11 +219,11 @@ def auth_ui():
         unsafe_allow_html=True,
     )
 
-    # Create a centered auth form with fixed max width
+    # Create a centered auth form with balanced width
     st.markdown(
         """
         <div style="display: flex; justify-content: center;">
-        <div style="width: 100%; max-width: 400px;">
+        <div style="width: 100%; max-width: 550px;">
         """,
         unsafe_allow_html=True,
     )
