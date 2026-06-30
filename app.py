@@ -222,7 +222,7 @@ def auth_ui():
     col_l, col_m, col_r = st.columns([1, 2, 1])
     with col_m:
         st.markdown("### Authentication")
-        auth_tab1, auth_tab2 = st.tabs(["Login", "Sign Up"])
+        auth_tab1, auth_tab2, auth_tab3 = st.tabs(["Login", "Sign Up", "Google"])
 
         with auth_tab1:
             email = st.text_input("Email", key="login_email")
@@ -260,6 +260,25 @@ def auth_ui():
                     st.success("Account created! Log in with your credentials.")
                 except Exception as e:
                     st.error(f"Sign up failed: {str(e)}")
+
+        with auth_tab3:
+            if st.button("Sign In with Google", key="google_button", use_container_width=True):
+                try:
+                    response = supabase.auth.sign_in_with_oauth(
+                        {
+                            "provider": "google",
+                            "options": {
+                                "redirect_to": "https://pb-budget.streamlit.app"
+                            }
+                        }
+                    )
+                    if response and hasattr(response, 'url') and response.url:
+                        st.markdown(
+                            f'[Click here to log in if you are not redirected automatically]({response.url})',
+                            unsafe_allow_html=False
+                        )
+                except Exception as e:
+                    st.error(f"Google sign in error: {str(e)}")
 
     return None
 WEEK_PERIODS = ["wk1", "wk2", "wk3", "wk4", "wk5"]
