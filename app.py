@@ -274,6 +274,11 @@ def auth_ui():
                     st.error(f"Sign up failed: {str(e)}")
 
         with auth_tab3:
+            # Don't show button if we're in an active auth callback
+            if st.query_params.get("code") or st.query_params.get("error"):
+                st.info("Processing authentication...")
+                st.stop()  # Let Supabase handle the callback
+            
             st.info("Click the button below to sign in with Google")
             try:
                 response = supabase.auth.sign_in_with_oauth(
