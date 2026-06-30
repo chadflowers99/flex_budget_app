@@ -223,7 +223,7 @@ def auth_ui():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             st.markdown("### Authentication")
-            auth_tab1, auth_tab2 = st.tabs(["Login", "Sign Up"])
+            auth_tab1, auth_tab2, auth_tab3 = st.tabs(["Login", "Sign Up", "Google"])
 
             with auth_tab1:
                 email = st.text_input("Email", key="login_email")
@@ -261,6 +261,24 @@ def auth_ui():
                         st.success("Account created! Log in with your credentials.")
                     except Exception as e:
                         st.error(f"Sign up failed: {str(e)}")
+
+            with auth_tab3:
+                if st.button("Sign In with Google", key="google_button", use_container_width=True):
+                    try:
+                        response = supabase.auth.sign_in_with_oauth(
+                            {
+                                "provider": "google",
+                                "options": {
+                                    "redirect_to": st.config.get_config_value("client:baseURL"),
+                                },
+                            }
+                        )
+                        if response and response.url:
+                            st.markdown(f'<a href="{response.url}" target="_self">Click here to sign in with Google</a>', unsafe_allow_html=True)
+                        else:
+                            st.error("Could not initiate Google sign in")
+                    except Exception as e:
+                        st.error(f"Google sign in failed: {str(e)}")
 
     return None
 WEEK_PERIODS = ["wk1", "wk2", "wk3", "wk4", "wk5"]
