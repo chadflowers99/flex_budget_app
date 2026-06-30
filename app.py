@@ -268,9 +268,6 @@ def auth_ui():
                         response = supabase.auth.sign_in_with_oauth(
                             {
                                 "provider": "google",
-                                "options": {
-                                    "redirect_to": st.config.get_config_value("client:baseURL"),
-                                },
                             }
                         )
                         if response and response.url:
