@@ -189,6 +189,8 @@ def auth_ui():
             if existing and existing.user:
                 st.session_state.user = existing.user
                 st.session_state.access_token = existing.access_token
+                # Ensure the session is set on the client for RLS policies
+                supabase.auth.set_session(existing.access_token, existing.refresh_token)
                 return st.session_state.user
         except Exception:
             pass
@@ -210,6 +212,9 @@ def auth_ui():
             if response and response.user:
                 st.session_state.user = response.user
                 st.session_state.access_token = response.session.access_token if response.session else None
+                # Set the session on the Supabase client so RLS works
+                if response.session:
+                    supabase.auth.set_session(response.session.access_token, response.session.refresh_token)
                 st.query_params.clear()
                 st.rerun()
             else:
@@ -250,6 +255,8 @@ def auth_ui():
                     )
                     st.session_state.user = response.user
                     st.session_state.access_token = response.session.access_token
+                    # Set the session on the Supabase client so RLS works
+                    supabase.auth.set_session(response.session.access_token, response.session.refresh_token)
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login attempt failed: {str(e)}")
@@ -269,6 +276,8 @@ def auth_ui():
                     st.session_state.user = response.user
                     if response.session:
                         st.session_state.access_token = response.session.access_token
+                        # Set the session on the Supabase client so RLS works
+                        supabase.auth.set_session(response.session.access_token, response.session.refresh_token)
                     st.success("Account created! Log in with your credentials.")
                 except Exception as e:
                     st.error(f"Sign up failed: {str(e)}")
