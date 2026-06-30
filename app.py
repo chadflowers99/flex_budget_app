@@ -208,38 +208,48 @@ def auth_ui():
             st.query_params.clear()
 
     st.markdown("### Authentication")
-    col1, col2 = st.columns(2)
+    
+    with st.container():
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            auth_tab1, auth_tab2 = st.tabs(["Login", "Sign Up"])
 
-    with col1:
-        st.markdown("**Login**")
-        login_email = st.text_input("Email", key="login_email")
-        login_password = st.text_input("Password", type="password", key="login_password")
-        if st.button("Log In", key="login_button", use_container_width=True):
-            try:
-                response = supabase.auth.sign_in_with_password(
-                    {"email": login_email, "password": login_password}
-                )
-                st.session_state.user = response.user
-                st.session_state.access_token = response.session.access_token
-                st.rerun()
-            except Exception as e:
-                st.error(f"Login failed: {str(e)}")
+            with auth_tab1:
+                email = st.text_input("Email", key="login_email")
+                password = st.text_input("Password", type="password", key="login_password")
 
-    with col2:
-        st.markdown("**Sign Up**")
-        signup_email = st.text_input("Email", key="signup_email")
-        signup_password = st.text_input("Password", type="password", key="signup_password")
-        if st.button("Sign Up", key="signup_button", use_container_width=True):
-            try:
-                response = supabase.auth.sign_up(
-                    {"email": signup_email, "password": signup_password}
-                )
-                st.session_state.user = response.user
-                if response.session:
-                    st.session_state.access_token = response.session.access_token
-                st.success("Account created! Log in with your credentials.")
-            except Exception as e:
-                st.error(f"Sign up failed: {str(e)}")
+                if st.button("Log In", key="login_button", use_container_width=True):
+                    try:
+                        response = supabase.auth.sign_in_with_password(
+                            {
+                                "email": email,
+                                "password": password,
+                            }
+                        )
+                        st.session_state.user = response.user
+                        st.session_state.access_token = response.session.access_token
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Login attempt failed: {str(e)}")
+
+            with auth_tab2:
+                email = st.text_input("Email", key="signup_email")
+                password = st.text_input("Password", type="password", key="signup_password")
+
+                if st.button("Sign Up", key="signup_button", use_container_width=True):
+                    try:
+                        response = supabase.auth.sign_up(
+                            {
+                                "email": email,
+                                "password": password,
+                            }
+                        )
+                        st.session_state.user = response.user
+                        if response.session:
+                            st.session_state.access_token = response.session.access_token
+                        st.success("Account created! Log in with your credentials.")
+                    except Exception as e:
+                        st.error(f"Sign up failed: {str(e)}")
 
     return None
 WEEK_PERIODS = ["wk1", "wk2", "wk3", "wk4", "wk5"]
