@@ -207,11 +207,10 @@ def auth_ui():
             st.error(f"Login attempt failed: {str(e)}")
             st.query_params.clear()
 
-    st.markdown("### Authentication")
-    
     with st.container():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
+            st.markdown("### Authentication")
             auth_tab1, auth_tab2 = st.tabs(["Login", "Sign Up"])
 
             with auth_tab1:
