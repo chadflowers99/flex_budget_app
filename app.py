@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import streamlit as st
+
+# MUST BE FIRST STREAMLIT COMMAND
+st.set_page_config(page_title="Flexible Budget", layout="wide")
+
 import ast
 import calendar
 import json
@@ -9,7 +14,6 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
-import streamlit as st
 from supabase import create_client, Client
 from supabase.client import ClientOptions
 
@@ -608,8 +612,6 @@ def safe_eval_expression(expr: str) -> float:
 
 
 def main() -> None:
-    st.set_page_config(page_title="Flexible Budget", layout="wide")
-    
     # Authenticate user first
     user = auth_ui()
     if not user:
