@@ -274,26 +274,23 @@ def auth_ui():
                     st.error(f"Sign up failed: {str(e)}")
 
         with auth_tab3:
-            # Don't show button if we're in an active auth callback
-            if st.query_params.get("code") or st.query_params.get("error"):
-                st.info("Processing authentication...")
-                st.stop()  # Let Supabase handle the callback
-            
-            st.info("Click the button below to sign in with Google")
-            try:
-                response = supabase.auth.sign_in_with_oauth(
-                    {
-                        "provider": "google",
-                        "options": {"redirect_to": "https://pb-budget.streamlit.app"}
-                    }
-                )
-                oauth_url = response.url if (response and hasattr(response, 'url')) else None
-                if oauth_url:
-                    st.link_button("Sign In with Google", oauth_url, use_container_width=True)
-                else:
-                    st.error("Could not generate Google sign-in URL")
-            except Exception as e:
-                st.error(f"Google sign in error: {str(e)}")
+            # Skip button rendering during callback (callback handler processes it above)
+            if not (st.query_params.get("code") or st.query_params.get("error")):
+                st.info("Click the button below to sign in with Google")
+                try:
+                    response = supabase.auth.sign_in_with_oauth(
+                        {
+                            "provider": "google",
+                            "options": {"redirect_to": "https://pb-budget.streamlit.app"}
+                        }
+                    )
+                    oauth_url = response.url if (response and hasattr(response, 'url')) else None
+                    if oauth_url:
+                        st.link_button("Sign In with Google", oauth_url, use_container_width=True)
+                    else:
+                        st.error("Could not generate Google sign-in URL")
+                except Exception as e:
+                    st.error(f"Google sign in error: {str(e)}")
 
     return None
 WEEK_PERIODS = ["wk1", "wk2", "wk3", "wk4", "wk5"]
