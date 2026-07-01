@@ -400,19 +400,22 @@ def load_cash_flow_from_supabase(user_id: str) -> dict[str, float]:
 def persist_to_supabase(user_id: str, bills_df: pd.DataFrame, bill_catalog: list[str], cash_flow_by_period: dict[str, float]) -> None:
     """Save all data to Supabase for the authenticated user."""
     try:
-        # Upsert bills
+        # Fully sync bills so removed rows do not reappear on next load.
+        supabase.table("bills").delete().eq("user_id", user_id).execute()
         if not bills_df.empty:
             bills_list = bills_df.to_dict(orient="records")
             for bill in bills_list:
                 bill["user_id"] = user_id
-            supabase.table("bills").upsert(bills_list, on_conflict="user_id,period,bill").execute()
-        
-        # Upsert bill catalog
-        if bill_catalog:
-            catalog_list = [{"user_id": user_id, "bill": bill} for bill in ensure_bill_catalog(bill_catalog)]
-            supabase.table("bill_catalog").upsert(catalog_list, on_conflict="user_id,bill").execute()
-        
-        # Upsert cash flow
+            supabase.table("bills").insert(bills_list).execute()
+
+        # Fully sync bill catalog so deletions persist.
+        supabase.table("bill_catalog").delete().eq("user_id", user_id).execute()
+        catalog_values = ensure_bill_catalog(bill_catalog)
+        if catalog_values:
+            catalog_list = [{"user_id": user_id, "bill": bill} for bill in catalog_values]
+            supabase.table("bill_catalog").insert(catalog_list).execute()
+
+        # Upsert cash flow (fixed set of week keys).
         cashflow_list = [
             {"user_id": user_id, "period": period, "cash_flow": float(cash_flow_by_period.get(period, 0.0))}
             for period in WEEK_PERIODS
