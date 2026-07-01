@@ -1,13 +1,14 @@
-# Flexible Budget App
+# Cash Flow
 
-A Streamlit app for flexible budgeting where bill due dates can shift between pay periods.
+A multi-user Streamlit app for weekly budget planning with real-time Supabase sync.
 
 ## Features
 
-- Edit bills and income directly in app tables.
-- Move bills between periods by changing the period value.
-- Automatic period summary: income, expenses, net, running balance.
-- Save and load bills/income to CSV.
+- **Weekly Budget Planning**: Organize bills into flexible 5-week planning cycles
+- **Real-time Sync**: Automatic cloud synchronization with Supabase
+- **Multi-User**: Team collaboration with row-level security (RLS)
+- **Authentication**: Email/password and Google OAuth login
+- **Cash Flow Projections**: Track income, expenses, and running balance
 
 ## Quick Start
 
@@ -17,15 +18,16 @@ A Streamlit app for flexible budgeting where bill due dates can shift between pa
    pip install -r requirements.txt
    ```
 
-2. Run:
+2. Set up environment:
+   - Create `.streamlit/secrets.toml` with Supabase credentials
+   - Get your credentials from [Supabase Dashboard](https://supabase.com)
+
+3. Run:
 
    ```powershell
    streamlit run app.py
    ```
 
-## Data Files
+## Deployment
 
-- `bills.csv`
-- `income.csv`
-
-If files do not exist, the app starts with defaults and can create them when you click Save.
+Deployed to Streamlit Cloud: [pb-budget.streamlit.app](https://pb-budget.streamlit.app)

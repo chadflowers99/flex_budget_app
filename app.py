@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 # MUST BE FIRST STREAMLIT COMMAND
-st.set_page_config(page_title="Flexible Budget", layout="wide")
+st.set_page_config(page_title="Cash Flow", layout="wide")
 
 import ast
 import calendar
@@ -699,9 +699,9 @@ def main() -> None:
         st.markdown(
             """
             <div>
-                <h1 style='margin: 0; line-height: 1.05;'>Portfolio brand.</h1>
+                <h1 style='margin: 0; line-height: 1.05;'>Cash Flow</h1>
                 <div style='font-size: 0.72rem;'>
-                    FLEXIBLE BUDGET PLANNER
+                    WEEKLY BUDGET PLANNER
                 </div>
             </div>
             """,
