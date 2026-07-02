@@ -839,17 +839,9 @@ def main() -> None:
                 key=f"bill_picker_{period}",
             )
 
-            pending_zero_key = f"pending_zero_{period}"
-            if st.session_state.get(pending_zero_key, False):
-                st.session_state.period_amount_cache[period] = {bill_name: 0.0 for bill_name in selected_bills}
-                for bill_name in selected_bills:
-                    amount_key = f"amount_input_{period}_{bill_name}"
-                    st.session_state[amount_key] = "0.00"
-                cash_flow_key_reset = f"cash_flow_{period}"
-                st.session_state[cash_flow_key_reset] = "0.00"
-                st.session_state.cash_flow_by_period[period] = 0.0
-                st.session_state[pending_zero_key] = False
-                st.success(f"Amounts and cash flow cleared for {period}.")
+            confirm_zero_key = f"confirm_zero_{period}"
+            if confirm_zero_key not in st.session_state:
+                st.session_state[confirm_zero_key] = False
 
             # Keep cache aligned with currently selected bills for this period.
             st.session_state.period_amount_cache[period] = {
@@ -911,7 +903,7 @@ def main() -> None:
             action_col1, action_col2 = st.columns(2)
             with action_col1:
                 if st.button("Refresh amounts", key=f"zero_all_{period}"):
-                    st.session_state[pending_zero_key] = True
+                    st.session_state[confirm_zero_key] = True
                     st.rerun()
 
             with action_col2:
@@ -924,6 +916,25 @@ def main() -> None:
                     key=f"download_snapshot_{period}",
                     on_click="ignore",
                 )
+
+            if st.session_state.get(confirm_zero_key, False):
+                st.warning(f"Refresh amounts for {period}? This will set selected bill amounts and cash flow to 0.00.")
+                confirm_col, cancel_col = st.columns(2)
+                with confirm_col:
+                    if st.button("Confirm refresh", key=f"confirm_zero_btn_{period}", type="primary"):
+                        st.session_state.period_amount_cache[period] = {bill_name: 0.0 for bill_name in selected_bills}
+                        for bill_name in selected_bills:
+                            amount_key = f"amount_input_{period}_{bill_name}"
+                            st.session_state[amount_key] = "0.00"
+                        cash_flow_key_reset = f"cash_flow_{period}"
+                        st.session_state[cash_flow_key_reset] = "0.00"
+                        st.session_state.cash_flow_by_period[period] = 0.0
+                        st.session_state[confirm_zero_key] = False
+                        st.rerun()
+                with cancel_col:
+                    if st.button("Cancel", key=f"cancel_zero_btn_{period}"):
+                        st.session_state[confirm_zero_key] = False
+                        st.rerun()
 
             rebuilt_bills.append(cleaned_period)
 
