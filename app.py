@@ -232,7 +232,7 @@ def auth_ui():
         <div style="text-align: center;">
             <h1>Portfolio brand.</h1>
             <div style="font-size: 18px; margin-bottom: 30px;">
-                CASHFLOW
+                CASH FLOW
             </div>
         </div>
         """,
