@@ -151,6 +151,30 @@ def _build_auth_storage():
     return MemoryAuthStorage()
 
 
+def _resolve_oauth_redirect_url() -> str:
+    """Build OAuth callback URL for current host, with secrets override support."""
+    configured = (
+        st.secrets.get("OAUTH_REDIRECT_URL")
+        or st.secrets.get("APP_REDIRECT_URL")
+        or (supabase_block.get("OAUTH_REDIRECT_URL") if isinstance(supabase_block, dict) else None)
+    )
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+
+    try:
+        headers = getattr(st.context, "headers", {})
+        host = (headers.get("x-forwarded-host") or headers.get("host") or "").strip()
+        proto = (headers.get("x-forwarded-proto") or "https").split(",")[0].strip()
+        if host:
+            if host.startswith("localhost") or host.startswith("127.0.0.1"):
+                proto = "http"
+            return f"{proto}://{host}"
+    except Exception:
+        pass
+
+    return "https://pb-flexbudget.streamlit.app"
+
+
 # Initialize Supabase client with appropriate storage backend.
 @st.cache_resource
 def get_supabase_client() -> Client:
@@ -289,17 +313,23 @@ def auth_ui():
             # Skip button rendering during callback (callback handler processes it above)
             if not (st.query_params.get("code") or st.query_params.get("error")):
                 st.info("Click the button below to sign in with Google")
+                redirect_to = _resolve_oauth_redirect_url()
                 
                 # Cache the OAuth URL to avoid regenerating the PKCE verifier on each render
-                if "oauth_url" not in st.session_state:
+                should_refresh_oauth = (
+                    "oauth_url" not in st.session_state
+                    or st.session_state.get("oauth_redirect_to") != redirect_to
+                )
+                if should_refresh_oauth:
                     try:
                         response = supabase.auth.sign_in_with_oauth(
                             {
                                 "provider": "google",
-                                "options": {"redirect_to": "https://pb-budget.streamlit.app"}
+                                "options": {"redirect_to": redirect_to}
                             }
                         )
                         st.session_state.oauth_url = response.url if (response and hasattr(response, 'url')) else None
+                        st.session_state.oauth_redirect_to = redirect_to
                     except Exception as e:
                         st.error(f"Google sign in error: {str(e)}")
                 
