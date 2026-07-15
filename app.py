@@ -731,7 +731,7 @@ def main() -> None:
             <div>
                 <h1 style='margin: 0; line-height: 1.05;'>Portfolio brand.</h1>
                 <div style='font-size: 0.72rem;'>
-                    WEEKLY BUDGET PLANNER
+                    FLEX BUDGET
                 </div>
             </div>
             """,
