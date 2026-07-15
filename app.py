@@ -803,8 +803,8 @@ def main() -> None:
     st.subheader("Bills by Period")
     st.caption("Select bills from the dropdown for each week, then edit amounts.")
 
-    # Bill management tabs
-    bill_tab1, bill_tab2 = st.tabs(["Add bill", "Delete bill"])
+    # Bill management tab
+    (bill_tab1,) = st.tabs(["Add bill"])
     
     with bill_tab1:
         add_col1, add_col2 = st.columns([3, 1])
@@ -823,20 +823,7 @@ def main() -> None:
                     persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
                     st.rerun()
     
-    with bill_tab2:
-        delete_col1, delete_col2 = st.columns([3, 1])
-        with delete_col1:
-            bill_to_delete = st.selectbox("Select bill", options=ensure_bill_catalog(st.session_state.bill_catalog), placeholder="Choose bill", label_visibility="collapsed")
-        with delete_col2:
-            if st.button("Delete", key="delete_bill_btn"):
-                if bill_to_delete:
-                    st.session_state.bill_catalog = [bill for bill in st.session_state.bill_catalog if bill != bill_to_delete]
-                    st.success(f"Deleted: {bill_to_delete}")
-                    persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
-                    st.rerun()
-                else:
-                    st.warning("Select a bill.")
-    
+
     bill_catalog = ensure_bill_catalog(st.session_state.bill_catalog)
     if not bill_catalog:
         bill_catalog = ensure_bill_catalog(DEFAULT_BILLS["bill"].astype(str).tolist())
