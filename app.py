@@ -825,7 +825,7 @@ def main() -> None:
     st.caption("Select bills from the dropdown for each week, then edit amounts.")
 
     # Bill management tab
-    (bill_tab1,) = st.tabs(["Add bill"])
+    bill_tab1, bill_tab2 = st.tabs(["Add bill", "Delete bill"])
     
     with bill_tab1:
         add_col1, add_col2 = st.columns([3, 1])
@@ -843,6 +843,22 @@ def main() -> None:
                     st.success(f"Added: {candidate}")
                     persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
                     st.rerun()
+
+    with bill_tab2:
+        del_col1, del_col2 = st.columns([3, 1])
+        with del_col1:
+            bill_to_delete = st.selectbox("Bill to delete", options=[""] + st.session_state.bill_catalog, label_visibility="collapsed", key="delete_bill_select")
+        with del_col2:
+            if st.button("Delete", key="delete_bill_btn", disabled=not bool(bill_to_delete)):
+                candidate = str(bill_to_delete)
+                st.session_state.bill_catalog = [b for b in st.session_state.bill_catalog if b != candidate]
+                st.session_state.bills = st.session_state.bills[st.session_state.bills["bill"] != candidate]
+                for period in WEEK_PERIODS:
+                    key = f"selected_bills_{period}"
+                    if key in st.session_state:
+                        st.session_state[key] = [b for b in st.session_state[key] if b != candidate]
+                persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
+                st.rerun()
     
 
     bill_catalog = ensure_bill_catalog(st.session_state.bill_catalog)
