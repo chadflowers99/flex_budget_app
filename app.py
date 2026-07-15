@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 # MUST BE FIRST STREAMLIT COMMAND
-st.set_page_config(page_title="Flex Budget", layout="wide")
+st.set_page_config(page_title="Portfolio brand.", layout="wide")
 
 import ast
 import calendar
@@ -254,7 +254,7 @@ def auth_ui():
     st.markdown(
         """
         <div style="text-align: center;">
-            <h1>Flex Budget</h1>
+            <h1>Portfolio brand.</h1>
             <div style="font-size: 18px; margin-bottom: 30px;">
                 FLEX BUDGET
             </div>
@@ -729,7 +729,7 @@ def main() -> None:
         st.markdown(
             """
             <div>
-                <h1 style='margin: 0; line-height: 1.05;'>Flex Budget</h1>
+                <h1 style='margin: 0; line-height: 1.05;'>Portfolio brand.</h1>
                 <div style='font-size: 0.72rem;'>
                     WEEKLY BUDGET PLANNER
                 </div>
