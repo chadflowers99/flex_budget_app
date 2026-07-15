@@ -870,12 +870,33 @@ def main() -> None:
                     if bill_name not in cache_for_period:
                         cache_for_period[bill_name] = float(row.amount)
 
-            selected_bills = st.multiselect(
-                f"Bills for {period}",
-                options=bill_catalog,
-                default=existing_bills,
-                key=f"bill_picker_{period}",
-            )
+            selected_key = f"selected_bills_{period}"
+            if selected_key not in st.session_state:
+                st.session_state[selected_key] = existing_bills.copy()
+            else:
+                merged = [bill for bill in st.session_state[selected_key] if bill in bill_catalog]
+                for bill in existing_bills:
+                    if bill in bill_catalog and bill not in merged:
+                        merged.append(bill)
+                st.session_state[selected_key] = merged
+
+            selected_bills = st.session_state[selected_key]
+
+            add_options = [bill for bill in bill_catalog if bill not in selected_bills]
+            add_col1, add_col2 = st.columns([4, 1])
+            with add_col1:
+                bill_to_add = st.selectbox(
+                    f"Add bill to {period}",
+                    options=[""] + add_options,
+                    key=f"bill_add_select_{period}",
+                )
+            with add_col2:
+                if st.button("Add", key=f"bill_add_btn_{period}", disabled=not bool(bill_to_add)):
+                    if bill_to_add and bill_to_add not in selected_bills:
+                        st.session_state[selected_key] = selected_bills + [bill_to_add]
+                    st.rerun()
+
+            selected_bills = st.session_state[selected_key]
 
             confirm_zero_key = f"confirm_zero_{period}"
             if confirm_zero_key not in st.session_state:
