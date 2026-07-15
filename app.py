@@ -747,11 +747,11 @@ def main() -> None:
 
         nav_col1, nav_col2, nav_col3 = st.columns([1, 3, 1])
         with nav_col1:
-            st.button("<", key="calendar_prev_month", on_click=shift_calendar_month, args=(-1,))
+            st.button("< Prev", key="calendar_prev_month", on_click=shift_calendar_month, args=(-1,))
         with nav_col2:
             st.caption(f"{calendar.month_name[st.session_state.calendar_month]} {st.session_state.calendar_year}")
         with nav_col3:
-            st.button(">", key="calendar_next_month", on_click=shift_calendar_month, args=(1,))
+            st.button("Next >", key="calendar_next_month", on_click=shift_calendar_month, args=(1,))
 
         sunday_first_cal = calendar.Calendar(firstweekday=6)
         month_grid = sunday_first_cal.monthdayscalendar(st.session_state.calendar_year, st.session_state.calendar_month)
