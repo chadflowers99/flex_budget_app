@@ -874,11 +874,8 @@ def main() -> None:
             if selected_key not in st.session_state:
                 st.session_state[selected_key] = existing_bills.copy()
             else:
-                merged = [bill for bill in st.session_state[selected_key] if bill in bill_catalog]
-                for bill in existing_bills:
-                    if bill in bill_catalog and bill not in merged:
-                        merged.append(bill)
-                st.session_state[selected_key] = merged
+                # Trust the current session state; only filter out bills removed from catalog
+                st.session_state[selected_key] = [bill for bill in st.session_state[selected_key] if bill in bill_catalog]
 
             selected_bills = st.session_state[selected_key]
 
