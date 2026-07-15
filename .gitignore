@@ -1,4 +1,5 @@
 .streamlit/secrets.toml
+.streamlit/supabase_auth_storage.json
 __pycache__/
 .vscode/
 *.pyc
