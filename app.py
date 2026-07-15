@@ -825,9 +825,9 @@ def main() -> None:
     st.caption("Select bills from the dropdown for each week, then edit amounts.")
 
     # Bill management tab
-    bill_tab1, bill_tab2 = st.tabs(["Add bill", "Delete bill"])
+    bill_tabs = st.tabs(["Add bill", "Delete bill"])
     
-    with bill_tab1:
+    with bill_tabs[0]:
         add_col1, add_col2 = st.columns([3, 1])
         with add_col1:
             new_bill_name = st.text_input("Bill name", placeholder="internet", label_visibility="collapsed")
@@ -844,7 +844,7 @@ def main() -> None:
                     persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
                     st.rerun()
 
-    with bill_tab2:
+    with bill_tabs[1]:
         del_col1, del_col2 = st.columns([3, 1])
         with del_col1:
             bill_to_delete = st.selectbox("Bill to delete", options=[""] + st.session_state.bill_catalog, label_visibility="collapsed", key="delete_bill_select")
@@ -896,9 +896,9 @@ def main() -> None:
             selected_bills = st.session_state[selected_key]
 
             add_options = [bill for bill in bill_catalog if bill not in selected_bills]
-            period_tab_add, period_tab_remove = st.tabs(["Add", "Remove"])
+            period_tabs = st.tabs(["Add", "Remove"])
 
-            with period_tab_add:
+            with period_tabs[0]:
                 add_col1, add_col2 = st.columns([4, 1])
                 with add_col1:
                     bill_to_add = st.selectbox(
@@ -913,7 +913,7 @@ def main() -> None:
                             st.session_state[selected_key] = selected_bills + [bill_to_add]
                         st.rerun()
 
-            with period_tab_remove:
+            with period_tabs[1]:
                 remove_col1, remove_col2 = st.columns([4, 1])
                 with remove_col1:
                     bill_to_remove = st.selectbox(
