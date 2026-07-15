@@ -1018,6 +1018,9 @@ def main() -> None:
                 with confirm_col:
                     if st.button("Confirm refresh", key=f"confirm_zero_btn_{period}", type="primary"):
                         st.session_state.period_amount_cache[period] = {bill_name: 0.0 for bill_name in selected_bills}
+                        for bill_name in selected_bills:
+                            st.session_state.pop(f"amount_input_{period}_{bill_name}", None)
+                        st.session_state.pop(f"cash_flow_{period}", None)
                         st.session_state.cash_flow_by_period[period] = 0.0
                         st.session_state[confirm_zero_key] = False
                         st.rerun()
