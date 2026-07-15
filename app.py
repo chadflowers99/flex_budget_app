@@ -896,7 +896,7 @@ def main() -> None:
             selected_bills = st.session_state[selected_key]
 
             add_options = [bill for bill in bill_catalog if bill not in selected_bills]
-            period_tabs = st.tabs([f"Add ({period})", f"Remove ({period})"])
+            period_tabs = st.tabs([f"Add {period} bill", f"Remove {period} bill"])
 
             with period_tabs[0]:
                 add_col1, add_col2 = st.columns([4, 1])
