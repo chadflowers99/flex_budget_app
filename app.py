@@ -898,6 +898,25 @@ def main() -> None:
 
             selected_bills = st.session_state[selected_key]
 
+            remove_col1, remove_col2 = st.columns([4, 1])
+            with remove_col1:
+                bill_to_remove = st.selectbox(
+                    f"Remove bill from {period}",
+                    options=[""] + selected_bills,
+                    key=f"bill_remove_select_{period}",
+                )
+            with remove_col2:
+                if st.button("Remove", key=f"bill_remove_btn_{period}", disabled=not bool(bill_to_remove)):
+                    if bill_to_remove in selected_bills:
+                        st.session_state[selected_key] = [
+                            bill_name for bill_name in selected_bills if bill_name != bill_to_remove
+                        ]
+                        st.session_state.period_amount_cache[period].pop(bill_to_remove, None)
+                        st.session_state.pop(f"amount_input_{period}_{bill_to_remove}", None)
+                    st.rerun()
+
+            selected_bills = st.session_state[selected_key]
+
             confirm_zero_key = f"confirm_zero_{period}"
             if confirm_zero_key not in st.session_state:
                 st.session_state[confirm_zero_key] = False
