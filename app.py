@@ -713,6 +713,27 @@ def main() -> None:
         st.stop()
     
     user_id = user.id
+
+    st.markdown(
+        """
+        <style>
+        /* Hide select clear controls (x) to avoid accidental full clears in bill pickers. */
+        div[data-baseweb="select"] button[aria-label="Clear value"],
+        div[data-baseweb="select"] button[aria-label="Clear all"],
+        div[data-baseweb="select"] button[title="Clear value"],
+        div[data-baseweb="select"] button[title="Clear all"] {
+            display: none !important;
+            visibility: hidden !important;
+            width: 0 !important;
+            min-width: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border: 0 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     
     # Add logout button in sidebar
     with st.sidebar:
