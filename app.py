@@ -896,37 +896,41 @@ def main() -> None:
             selected_bills = st.session_state[selected_key]
 
             add_options = [bill for bill in bill_catalog if bill not in selected_bills]
-            add_col1, add_col2 = st.columns([4, 1])
-            with add_col1:
-                bill_to_add = st.selectbox(
-                    f"Add bill to {period}",
-                    options=[""] + add_options,
-                    key=f"bill_add_select_{period}",
-                )
-            with add_col2:
-                if st.button("Add", key=f"bill_add_btn_{period}", disabled=not bool(bill_to_add)):
-                    if bill_to_add and bill_to_add not in selected_bills:
-                        st.session_state[selected_key] = selected_bills + [bill_to_add]
-                    st.rerun()
+            period_tab_add, period_tab_remove = st.tabs(["Add", "Remove"])
 
-            selected_bills = st.session_state[selected_key]
+            with period_tab_add:
+                add_col1, add_col2 = st.columns([4, 1])
+                with add_col1:
+                    bill_to_add = st.selectbox(
+                        f"Add bill to {period}",
+                        options=[""] + add_options,
+                        key=f"bill_add_select_{period}",
+                        label_visibility="collapsed",
+                    )
+                with add_col2:
+                    if st.button("Add", key=f"bill_add_btn_{period}", disabled=not bool(bill_to_add)):
+                        if bill_to_add and bill_to_add not in selected_bills:
+                            st.session_state[selected_key] = selected_bills + [bill_to_add]
+                        st.rerun()
 
-            remove_col1, remove_col2 = st.columns([4, 1])
-            with remove_col1:
-                bill_to_remove = st.selectbox(
-                    f"Remove bill from {period}",
-                    options=[""] + selected_bills,
-                    key=f"bill_remove_select_{period}",
-                )
-            with remove_col2:
-                if st.button("Remove", key=f"bill_remove_btn_{period}", disabled=not bool(bill_to_remove)):
-                    if bill_to_remove in selected_bills:
-                        st.session_state[selected_key] = [
-                            bill_name for bill_name in selected_bills if bill_name != bill_to_remove
-                        ]
-                        st.session_state.period_amount_cache[period].pop(bill_to_remove, None)
-                        st.session_state.pop(f"amount_input_{period}_{bill_to_remove}", None)
-                    st.rerun()
+            with period_tab_remove:
+                remove_col1, remove_col2 = st.columns([4, 1])
+                with remove_col1:
+                    bill_to_remove = st.selectbox(
+                        f"Remove bill from {period}",
+                        options=[""] + selected_bills,
+                        key=f"bill_remove_select_{period}",
+                        label_visibility="collapsed",
+                    )
+                with remove_col2:
+                    if st.button("Remove", key=f"bill_remove_btn_{period}", disabled=not bool(bill_to_remove)):
+                        if bill_to_remove in selected_bills:
+                            st.session_state[selected_key] = [
+                                bill_name for bill_name in selected_bills if bill_name != bill_to_remove
+                            ]
+                            st.session_state.period_amount_cache[period].pop(bill_to_remove, None)
+                            st.session_state.pop(f"amount_input_{period}_{bill_to_remove}", None)
+                        st.rerun()
 
             selected_bills = st.session_state[selected_key]
 
