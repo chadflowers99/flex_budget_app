@@ -774,6 +774,19 @@ def main() -> None:
         ]:
             st.session_state.pop(key, None)
 
+        # Clear dynamic per-period widget state that can otherwise survive mode switches.
+        dynamic_prefixes = (
+            "selected_bills_",
+            "amount_input_",
+            "cash_flow_expr_",
+            "confirm_zero_",
+            "bill_add_select_",
+            "bill_remove_select_",
+        )
+        for key in list(st.session_state.keys()):
+            if key.startswith(dynamic_prefixes):
+                st.session_state.pop(key, None)
+
     st.markdown(
         """
         <style>
