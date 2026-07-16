@@ -968,7 +968,7 @@ def main() -> None:
     
 
     bill_catalog = ensure_bill_catalog(st.session_state.bill_catalog)
-    if not bill_catalog:
+    if not bill_catalog and not is_guest:
         bill_catalog = ensure_bill_catalog(DEFAULT_BILLS["bill"].astype(str).tolist())
         st.session_state.bill_catalog = bill_catalog
 
