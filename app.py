@@ -926,8 +926,10 @@ def main() -> None:
         if "cash_flow_by_period" not in st.session_state:
             st.session_state.cash_flow_by_period = load_cash_flow_from_supabase(user_id)
         if "cash_flow_expressions" not in st.session_state:
-            # Keep expressions in session state only (not persisted to DB)
-            st.session_state.cash_flow_expressions = {period: "" for period in WEEK_PERIODS}
+            # Seed visible inputs from saved values so login/rerun does not zero them out.
+            st.session_state.cash_flow_expressions = {
+                period: f"{float(st.session_state.cash_flow_by_period.get(period, 0.0)):.2f}" for period in WEEK_PERIODS
+            }
 
     periods = WEEK_PERIODS.copy()
 
