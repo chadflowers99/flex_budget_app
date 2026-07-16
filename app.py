@@ -410,9 +410,9 @@ def load_bill_catalog_from_supabase(user_id: str) -> list[str]:
         return []
 
 
-def load_cash_flow_from_supabase(user_id: str) -> dict[str, float]:
-    """Load cash flow by period from Supabase for the authenticated user."""
-    defaults = {period: 0.0 for period in WEEK_PERIODS}
+def load_cash_flow_from_supabase(user_id: str) -> dict[str, str]:
+    """Load cash flow expressions by period from Supabase for the authenticated user."""
+    defaults = {period: "" for period in WEEK_PERIODS}
     try:
         response = supabase.table("cash_flow").select("period, cash_flow").eq("user_id", user_id).execute()
         out = defaults.copy()
@@ -420,14 +420,15 @@ def load_cash_flow_from_supabase(user_id: str) -> dict[str, float]:
             for row in response.data:
                 period = normalize_period(str(row["period"]))
                 if period in out:
-                    out[period] = float(row["cash_flow"] if row["cash_flow"] is not None else 0.0)
+                    # Load expression string (could be "100+21+40" or "161")
+                    out[period] = str(row["cash_flow"]) if row["cash_flow"] is not None else ""
         return out
     except Exception as e:
         st.warning(f"Failed to load cash flow: {str(e)}")
         return defaults
 
 
-def persist_to_supabase(user_id: str, bills_df: pd.DataFrame, bill_catalog: list[str], cash_flow_by_period: dict[str, float]) -> None:
+def persist_to_supabase(user_id: str, bills_df: pd.DataFrame, bill_catalog: list[str], cash_flow_expressions: dict[str, str]) -> None:
     """Save all data to Supabase for the authenticated user."""
     try:
         # Fully sync bills so removed rows do not reappear on next load.
@@ -445,9 +446,9 @@ def persist_to_supabase(user_id: str, bills_df: pd.DataFrame, bill_catalog: list
             catalog_list = [{"user_id": user_id, "bill": bill} for bill in catalog_values]
             supabase.table("bill_catalog").insert(catalog_list).execute()
 
-        # Upsert cash flow (fixed set of week keys).
+        # Upsert cash flow expressions (stores "100+21+40" instead of just 161).
         cashflow_list = [
-            {"user_id": user_id, "period": period, "cash_flow": float(cash_flow_by_period.get(period, 0.0))}
+            {"user_id": user_id, "period": period, "cash_flow": cash_flow_expressions.get(period, "")}
             for period in WEEK_PERIODS
         ]
         supabase.table("cash_flow").upsert(cashflow_list, on_conflict="user_id,period").execute()
@@ -816,10 +817,15 @@ def main() -> None:
         st.session_state.bill_catalog = ensure_bill_catalog(catalog_from_db + base_catalog)
     if "period_amount_cache" not in st.session_state:
         st.session_state.period_amount_cache = build_period_amount_cache(st.session_state.bills)
-    if "cash_flow_by_period" not in st.session_state:
-        st.session_state.cash_flow_by_period = load_cash_flow_from_supabase(user_id)
     if "cash_flow_expressions" not in st.session_state:
-        st.session_state.cash_flow_expressions = {period: "" for period in WEEK_PERIODS}
+        # Load expressions from database (could be "100+21+40" or just "161")
+        st.session_state.cash_flow_expressions = load_cash_flow_from_supabase(user_id)
+    if "cash_flow_by_period" not in st.session_state:
+        # Derive numeric values from expressions
+        st.session_state.cash_flow_by_period = {
+            period: parse_numeric_text(expr, allow_expression=True)
+            for period, expr in st.session_state.cash_flow_expressions.items()
+        }
 
     periods = WEEK_PERIODS.copy()
 
@@ -843,7 +849,7 @@ def main() -> None:
                 else:
                     st.session_state.bill_catalog = ensure_bill_catalog(st.session_state.bill_catalog + [candidate])
                     st.success(f"Added: {candidate}")
-                    persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
+                    persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_expressions)
                     st.rerun()
 
     with bill_tabs[1]:
@@ -859,7 +865,7 @@ def main() -> None:
                     key = f"selected_bills_{period}"
                     if key in st.session_state:
                         st.session_state[key] = [b for b in st.session_state[key] if b != candidate]
-                persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
+                persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_expressions)
                 st.rerun()
     
 
@@ -976,14 +982,10 @@ def main() -> None:
 
             period_total = float(pd.to_numeric(cleaned_period["amount"], errors="coerce").fillna(0.0).sum())
             cash_flow_expr_key = f"cash_flow_expr_{period}"
-            # Initialize expression storage if needed
-            if period not in st.session_state.cash_flow_expressions:
-                st.session_state.cash_flow_expressions[period] = ""
             
-            # Use value parameter to control displayed value, keep key consistent for persistence
             period_cash_flow = st.text_input(
                 "Enter cash flow",
-                value=st.session_state.cash_flow_expressions[period],
+                value=st.session_state.cash_flow_expressions.get(period, ""),
                 key=cash_flow_expr_key,
                 placeholder="0.00",
             )
@@ -1047,7 +1049,7 @@ def main() -> None:
     st.session_state.bill_catalog = ensure_bill_catalog(
         bill_catalog + st.session_state.bills["bill"].astype(str).tolist()
     )
-    persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
+    persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_expressions)
 
     st.session_state.periods_order = WEEK_PERIODS.copy()
 
