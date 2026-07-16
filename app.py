@@ -976,15 +976,18 @@ def main() -> None:
 
             period_total = float(pd.to_numeric(cleaned_period["amount"], errors="coerce").fillna(0.0).sum())
             cash_flow_expr_key = f"cash_flow_expr_{period}"
-            # Initialize widget from expressions dict if not in session_state (browser refresh case)
-            if cash_flow_expr_key not in st.session_state:
-                st.session_state[cash_flow_expr_key] = st.session_state.cash_flow_expressions.get(period, "")
+            # Initialize expression storage if needed
+            if period not in st.session_state.cash_flow_expressions:
+                st.session_state.cash_flow_expressions[period] = ""
+            
+            # Use value parameter to control displayed value, keep key consistent for persistence
             period_cash_flow = st.text_input(
                 "Enter cash flow",
+                value=st.session_state.cash_flow_expressions[period],
                 key=cash_flow_expr_key,
                 placeholder="0.00",
             )
-            # Store expression and calculate numeric value
+            # Sync changes back to expression storage
             st.session_state.cash_flow_expressions[period] = period_cash_flow
             period_cash_flow_value = parse_numeric_text(period_cash_flow, allow_expression=True)
             st.session_state.cash_flow_by_period[period] = period_cash_flow_value
@@ -1025,8 +1028,9 @@ def main() -> None:
                         st.session_state.period_amount_cache[period] = {bill_name: 0.0 for bill_name in selected_bills}
                         for bill_name in selected_bills:
                             st.session_state.pop(f"amount_input_{period}_{bill_name}", None)
-                        st.session_state.pop(f"cash_flow_expr_{period}", None)
+                        # Clear cash flow expression and widget state
                         st.session_state.cash_flow_expressions[period] = ""
+                        st.session_state.pop(f"cash_flow_expr_{period}", None)
                         st.session_state.cash_flow_by_period[period] = 0.0
                         st.session_state[confirm_zero_key] = False
                         st.rerun()
