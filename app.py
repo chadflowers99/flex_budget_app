@@ -974,11 +974,14 @@ def main() -> None:
 
             period_total = float(pd.to_numeric(cleaned_period["amount"], errors="coerce").fillna(0.0).sum())
             cash_flow_key = f"cash_flow_{period}"
+            cash_flow_expr_key = f"cash_flow_expr_{period}"
             if cash_flow_key not in st.session_state:
-                st.session_state[cash_flow_key] = f"{float(st.session_state.cash_flow_by_period.get(period, 0.0)):.2f}"
+                st.session_state[cash_flow_key] = ""
+            if cash_flow_expr_key not in st.session_state:
+                st.session_state[cash_flow_expr_key] = f"{float(st.session_state.cash_flow_by_period.get(period, 0.0)):.2f}"
             period_cash_flow = st.text_input(
                 "Enter cash flow",
-                key=cash_flow_key,
+                key=cash_flow_expr_key,
                 placeholder="0.00",
             )
             period_cash_flow_value = parse_numeric_text(period_cash_flow, allow_expression=True)
@@ -1020,7 +1023,7 @@ def main() -> None:
                         st.session_state.period_amount_cache[period] = {bill_name: 0.0 for bill_name in selected_bills}
                         for bill_name in selected_bills:
                             st.session_state.pop(f"amount_input_{period}_{bill_name}", None)
-                        st.session_state.pop(f"cash_flow_{period}", None)
+                        st.session_state.pop(f"cash_flow_expr_{period}", None)
                         st.session_state.cash_flow_by_period[period] = 0.0
                         st.session_state[confirm_zero_key] = False
                         st.rerun()
