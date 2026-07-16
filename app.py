@@ -764,6 +764,7 @@ def main() -> None:
     def reset_budget_state() -> None:
         """Drop cached budget data so mode changes do not leak prior user state."""
         for key in [
+            "_guest_seeded",
             "bills",
             "periods_order",
             "bill_catalog",
@@ -883,21 +884,33 @@ def main() -> None:
         )
 
     # Load data from Supabase or initialize session state
-    if "bills" not in st.session_state:
-        st.session_state.bills = migrate_periods_to_weeks(clean_bills(load_bills_from_supabase(user_id)))
-    if "periods_order" not in st.session_state:
-        st.session_state.periods_order = WEEK_PERIODS.copy()
-    if "bill_catalog" not in st.session_state:
-        catalog_from_db = load_bill_catalog_from_supabase(user_id)
-        base_catalog = DEFAULT_BILLS["bill"].astype(str).tolist()
-        st.session_state.bill_catalog = ensure_bill_catalog(catalog_from_db + base_catalog)
-    if "period_amount_cache" not in st.session_state:
-        st.session_state.period_amount_cache = build_period_amount_cache(st.session_state.bills)
-    if "cash_flow_by_period" not in st.session_state:
-        st.session_state.cash_flow_by_period = load_cash_flow_from_supabase(user_id)
-    if "cash_flow_expressions" not in st.session_state:
-        # Keep expressions in session state only (not persisted to DB)
-        st.session_state.cash_flow_expressions = {period: "" for period in WEEK_PERIODS}
+    if is_guest:
+        if not st.session_state.get("_guest_seeded"):
+            st.session_state.bills = pd.DataFrame(columns=["period", "bill", "amount"])
+            st.session_state.periods_order = WEEK_PERIODS.copy()
+            st.session_state.bill_catalog = []
+            st.session_state.period_amount_cache = build_period_amount_cache(st.session_state.bills)
+            st.session_state.cash_flow_by_period = {period: 0.0 for period in WEEK_PERIODS}
+            # Keep expressions in session state only (not persisted to DB)
+            st.session_state.cash_flow_expressions = {period: "" for period in WEEK_PERIODS}
+            st.session_state._guest_seeded = True
+    else:
+        st.session_state.pop("_guest_seeded", None)
+        if "bills" not in st.session_state:
+            st.session_state.bills = migrate_periods_to_weeks(clean_bills(load_bills_from_supabase(user_id)))
+        if "periods_order" not in st.session_state:
+            st.session_state.periods_order = WEEK_PERIODS.copy()
+        if "bill_catalog" not in st.session_state:
+            catalog_from_db = load_bill_catalog_from_supabase(user_id)
+            base_catalog = DEFAULT_BILLS["bill"].astype(str).tolist()
+            st.session_state.bill_catalog = ensure_bill_catalog(catalog_from_db + base_catalog)
+        if "period_amount_cache" not in st.session_state:
+            st.session_state.period_amount_cache = build_period_amount_cache(st.session_state.bills)
+        if "cash_flow_by_period" not in st.session_state:
+            st.session_state.cash_flow_by_period = load_cash_flow_from_supabase(user_id)
+        if "cash_flow_expressions" not in st.session_state:
+            # Keep expressions in session state only (not persisted to DB)
+            st.session_state.cash_flow_expressions = {period: "" for period in WEEK_PERIODS}
 
     periods = WEEK_PERIODS.copy()
 
