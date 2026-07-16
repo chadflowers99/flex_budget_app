@@ -1098,10 +1098,11 @@ def main() -> None:
 
             cue_color = "#15803d" if period_remaining >= 0 else "#b91c1c"
             cue_text = "positive" if period_remaining >= 0 else "negative"
-            st.markdown(
-                f"<div style='font-size:0.8rem;color:{cue_color};font-weight:600;'>Net cue: {cue_text}</div>",
-                unsafe_allow_html=True,
-            )
+            with net_col:
+                st.markdown(
+                    f"<div style='font-size:0.8rem;color:{cue_color};font-weight:600;'>Net cue: {cue_text}</div>",
+                    unsafe_allow_html=True,
+                )
 
             action_col1, action_col2 = st.columns(2)
             with action_col1:
