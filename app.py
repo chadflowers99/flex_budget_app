@@ -159,7 +159,11 @@ def _is_writable(path: Path) -> bool:
 
 
 def _build_auth_storage():
-    """Always use per-session storage to prevent auth state sharing across users."""
+    """Use file-backed storage when possible so PKCE verifier survives OAuth redirect."""
+    if _is_writable(AUTH_STORAGE_FILE):
+        return FileAuthStorage(AUTH_STORAGE_FILE)
+    if _is_writable(AUTH_STORAGE_FILE_FALLBACK):
+        return FileAuthStorage(AUTH_STORAGE_FILE_FALLBACK)
     return SessionStateAuthStorage()
 
 
