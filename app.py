@@ -87,6 +87,22 @@ class MemoryAuthStorage:
         self._store.pop(key, None)
 
 
+class SessionStateAuthStorage:
+    """Session-scoped auth storage to avoid cross-user leakage on shared hosts."""
+    def get_item(self, key):
+        store = st.session_state.get("_supabase_auth_store", {})
+        return store.get(key)
+
+    def set_item(self, key, value):
+        if "_supabase_auth_store" not in st.session_state:
+            st.session_state._supabase_auth_store = {}
+        st.session_state._supabase_auth_store[key] = value
+
+    def remove_item(self, key):
+        store = st.session_state.get("_supabase_auth_store", {})
+        store.pop(key, None)
+
+
 class FileAuthStorage:
     """File-backed auth storage with session_state fallback for Streamlit Cloud."""
     def __init__(self, storage_file):
@@ -143,12 +159,8 @@ def _is_writable(path: Path) -> bool:
 
 
 def _build_auth_storage():
-    """Use file-backed storage when possible to preserve PKCE verifier on callback."""
-    if _is_writable(AUTH_STORAGE_FILE):
-        return FileAuthStorage(AUTH_STORAGE_FILE)
-    if _is_writable(AUTH_STORAGE_FILE_FALLBACK):
-        return FileAuthStorage(AUTH_STORAGE_FILE_FALLBACK)
-    return MemoryAuthStorage()
+    """Always use per-session storage to prevent auth state sharing across users."""
+    return SessionStateAuthStorage()
 
 
 def _resolve_oauth_redirect_url() -> str:
@@ -175,18 +187,19 @@ def _resolve_oauth_redirect_url() -> str:
     return "https://pb-flexbudget.streamlit.app"
 
 
-# Initialize Supabase client with appropriate storage backend.
-@st.cache_resource
+# Initialize Supabase client with session-scoped storage backend.
 def get_supabase_client() -> Client:
-    storage = _build_auth_storage()
-    return create_client(
-        SUPABASE_URL,
-        SUPABASE_ANON_KEY,
-        options=ClientOptions(
-            flow_type="pkce",
-            storage=storage,
-        ),
-    )
+    if "_supabase_client" not in st.session_state:
+        storage = _build_auth_storage()
+        st.session_state._supabase_client = create_client(
+            SUPABASE_URL,
+            SUPABASE_ANON_KEY,
+            options=ClientOptions(
+                flow_type="pkce",
+                storage=storage,
+            ),
+        )
+    return st.session_state._supabase_client
 
 
 supabase: Client = get_supabase_client()
@@ -202,22 +215,20 @@ def auth_ui():
     """Displays login/signup UI and manages authentication state."""
     if "user" not in st.session_state:
         st.session_state.user = None
+    if "guest_mode" not in st.session_state:
+        st.session_state.guest_mode = False
+    if "show_auth_form" not in st.session_state:
+        st.session_state.show_auth_form = False
+
+    if st.session_state.guest_mode:
+        st.session_state.user = None
+        return None
 
     if st.session_state.user:
         return st.session_state.user
 
-    # Restore session from file-backed storage after page refresh
-    if not st.session_state.user:
-        try:
-            existing = supabase.auth.get_session()
-            if existing and existing.user:
-                st.session_state.user = existing.user
-                st.session_state.access_token = existing.access_token
-                # Ensure the session is set on the client for RLS policies
-                supabase.auth.set_session(existing.access_token, existing.refresh_token)
-                return st.session_state.user
-        except Exception:
-            pass
+    # Privacy-first behavior: do not auto-restore an existing auth session.
+    # Users must explicitly choose to sign in from the landing page.
 
     oauth_error = st.query_params.get("error")
     oauth_error_description = st.query_params.get("error_description")
@@ -262,6 +273,29 @@ def auth_ui():
         """,
         unsafe_allow_html=True,
     )
+
+    landing_col1, landing_col2 = st.columns(2)
+    with landing_col1:
+        if st.button("Continue as Guest", key="continue_guest_btn", use_container_width=True):
+            st.session_state.guest_mode = True
+            st.session_state.show_auth_form = False
+            for key in [
+                "bills",
+                "periods_order",
+                "bill_catalog",
+                "period_amount_cache",
+                "cash_flow_by_period",
+                "cash_flow_expressions",
+            ]:
+                st.session_state.pop(key, None)
+            st.rerun()
+    with landing_col2:
+        if st.button("Sign In / Create Account", key="show_auth_btn", use_container_width=True):
+            st.session_state.show_auth_form = True
+
+    if not st.session_state.show_auth_form:
+        st.info("Choose an option above to continue.")
+        return None
 
     col_l, col_m, col_r = st.columns([1, 2, 1])
     with col_m:
@@ -388,6 +422,8 @@ def normalize_period(value: str) -> str:
 # Supabase load functions (replaces CSV loading)
 def load_bills_from_supabase(user_id: str) -> pd.DataFrame:
     """Load bills from Supabase for the authenticated user."""
+    if not user_id:
+        return DEFAULT_BILLS.copy()
     try:
         response = supabase.table("bills").select("period, bill, amount").eq("user_id", user_id).execute()
         if response.data:
@@ -400,6 +436,8 @@ def load_bills_from_supabase(user_id: str) -> pd.DataFrame:
 
 def load_bill_catalog_from_supabase(user_id: str) -> list[str]:
     """Load available bills from Supabase for the authenticated user."""
+    if not user_id:
+        return DEFAULT_BILLS["bill"].astype(str).tolist()
     try:
         response = supabase.table("bill_catalog").select("bill").eq("user_id", user_id).execute()
         if response.data:
@@ -413,6 +451,8 @@ def load_bill_catalog_from_supabase(user_id: str) -> list[str]:
 def load_cash_flow_from_supabase(user_id: str) -> dict[str, float]:
     """Load cash flow by period from Supabase for the authenticated user."""
     defaults = {period: 0.0 for period in WEEK_PERIODS}
+    if not user_id:
+        return defaults
     try:
         response = supabase.table("cash_flow").select("period, cash_flow").eq("user_id", user_id).execute()
         out = defaults.copy()
@@ -429,6 +469,8 @@ def load_cash_flow_from_supabase(user_id: str) -> dict[str, float]:
 
 def persist_to_supabase(user_id: str, bills_df: pd.DataFrame, bill_catalog: list[str], cash_flow_by_period: dict[str, float]) -> None:
     """Save all data to Supabase for the authenticated user."""
+    if not user_id:
+        return
     try:
         # Fully sync bills so removed rows do not reappear on next load.
         supabase.table("bills").delete().eq("user_id", user_id).execute()
@@ -709,10 +751,27 @@ def safe_eval_expression(expr: str) -> float:
 def main() -> None:
     # Authenticate user first
     user = auth_ui()
-    if not user:
+    is_guest = bool(st.session_state.get("guest_mode"))
+    if not user and not is_guest:
         st.stop()
-    
-    user_id = user.id
+
+    if is_guest:
+        st.session_state.user = None
+        st.session_state.access_token = None
+
+    user_id = user.id if user else ""
+
+    def reset_budget_state() -> None:
+        """Drop cached budget data so mode changes do not leak prior user state."""
+        for key in [
+            "bills",
+            "periods_order",
+            "bill_catalog",
+            "period_amount_cache",
+            "cash_flow_by_period",
+            "cash_flow_expressions",
+        ]:
+            st.session_state.pop(key, None)
 
     st.markdown(
         """
@@ -737,13 +796,31 @@ def main() -> None:
     
     # Add logout button in sidebar
     with st.sidebar:
-        if st.button("Logout"):
-            supabase.auth.sign_out()
-            st.session_state.user = None
-            st.session_state.access_token = None
-            st.session_state.pop("oauth_url", None)
-            st.rerun()
-        st.caption(f"Logged in as: {user.email}")
+        if is_guest:
+            st.caption("Guest mode")
+            if st.button("Sign In", key="guest_to_login"):
+                st.session_state.guest_mode = False
+                st.session_state.show_auth_form = True
+                reset_budget_state()
+                st.rerun()
+        else:
+            if st.button("Use Guest Mode", key="switch_to_guest"):
+                supabase.auth.sign_out()
+                st.session_state.user = None
+                st.session_state.access_token = None
+                st.session_state.guest_mode = True
+                st.session_state.show_auth_form = False
+                st.session_state.pop("oauth_url", None)
+                reset_budget_state()
+                st.rerun()
+            if st.button("Logout"):
+                supabase.auth.sign_out()
+                st.session_state.user = None
+                st.session_state.access_token = None
+                st.session_state.show_auth_form = False
+                st.session_state.pop("oauth_url", None)
+                reset_budget_state()
+                st.rerun()
 
     header_col, calendar_col = st.columns([3, 2])
     with header_col:
