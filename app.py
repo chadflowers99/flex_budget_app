@@ -239,36 +239,6 @@ def _resolve_oauth_redirect_url() -> str:
     return "https://pb-flexbudget.streamlit.app"
 
 
-def is_mobile_client() -> bool:
-    """Best-effort mobile detection from request headers."""
-    try:
-        headers = getattr(st.context, "headers", {})
-        user_agent = str(headers.get("user-agent") or "").lower()
-        ch_mobile = str(headers.get("sec-ch-ua-mobile") or "").strip().lower()
-    except Exception:
-        user_agent = ""
-        ch_mobile = ""
-
-    if ch_mobile == "?1":
-        return True
-
-    mobile_signals = [
-        "iphone",
-        "android",
-        "mobile",
-        "ipad",
-        "ipod",
-        "windows phone",
-        "webview",
-        " wv",
-        "okhttp",
-        "flutter",
-        "dart",
-        "cfnetwork",
-    ]
-    return any(signal in user_agent for signal in mobile_signals)
-
-
 # Initialize Supabase client with session-scoped storage backend.
 def get_supabase_client() -> Client:
     if "_supabase_client" not in st.session_state:
@@ -914,19 +884,6 @@ def main() -> None:
         st.session_state.access_token = None
 
     user_id = user.id if user else ""
-    mobile_client = is_mobile_client()
-    if "compact_amount_rows" not in st.session_state:
-        st.session_state.compact_amount_rows = mobile_client
-    if "compact_amount_rows_manual" not in st.session_state:
-        st.session_state.compact_amount_rows_manual = False
-    if "compact_amount_rows_ui" not in st.session_state:
-        st.session_state.compact_amount_rows_ui = bool(st.session_state.compact_amount_rows)
-
-    # Keep app behavior in sync with detected client unless user explicitly overrides it.
-    if not bool(st.session_state.get("compact_amount_rows_manual", False)):
-        st.session_state.compact_amount_rows = mobile_client
-        st.session_state.compact_amount_rows_ui = mobile_client
-
     def reset_budget_state() -> None:
         """Drop cached budget data so mode changes do not leak prior user state."""
         for key in [
@@ -1049,15 +1006,6 @@ def main() -> None:
     
     # Add logout button in sidebar
     with st.sidebar:
-        st.checkbox(
-            "Compact amount rows (mobile)",
-            key="compact_amount_rows_ui",
-            help="Enable this in app/webview if bill and amount fields stack vertically.",
-        )
-        if bool(st.session_state.get("compact_amount_rows_ui", False)) != bool(st.session_state.get("compact_amount_rows", False)):
-            st.session_state.compact_amount_rows = bool(st.session_state.get("compact_amount_rows_ui", False))
-            st.session_state.compact_amount_rows_manual = True
-
         if is_guest:
             st.caption("Guest mode")
             if st.button("Sign In", key="guest_to_login"):
@@ -1313,24 +1261,19 @@ def main() -> None:
 
             period_entries: list[dict[str, float | str]] = []
             if selected_bills:
-                compact_amount_rows = bool(st.session_state.get("compact_amount_rows", False))
                 for idx, bill_name in enumerate(selected_bills):
                     amount_key = f"amount_input_{period}_{bill_name}"
                     default_amount = float(st.session_state.period_amount_cache[period].get(bill_name, 0.0))
                     if amount_key not in st.session_state:
                         st.session_state[amount_key] = f"{default_amount:.2f}"
 
-                    # Keep desktop unchanged; allow explicit compact mode for app/webview.
-                    column_spec = [1, 2] if compact_amount_rows else [2, 3]
-                    name_col, amount_col = st.columns(column_spec)
+                    name_col, amount_col = st.columns([2, 3])
                     with name_col:
-                        bill_label = bill_name if not compact_amount_rows else (bill_name if len(bill_name) <= 10 else f"{bill_name[:9]}…")
                         if st.button(
-                            bill_label,
+                            bill_name,
                             key=f"select_bill_{period}_{bill_name}",
                             type="primary" if st.session_state.get(delete_select_key) == bill_name else "secondary",
-                            use_container_width=compact_amount_rows,
-                            help=bill_name if compact_amount_rows else None,
+                            use_container_width=False,
                         ):
                             if st.session_state.get(delete_select_key) == bill_name:
                                 st.session_state.pop(delete_select_key, None)
