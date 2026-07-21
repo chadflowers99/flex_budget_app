@@ -905,6 +905,8 @@ def main() -> None:
 
     user_id = user.id if user else ""
     mobile_client = is_mobile_client()
+    if "compact_amount_rows" not in st.session_state:
+        st.session_state.compact_amount_rows = mobile_client
 
     def reset_budget_state() -> None:
         """Drop cached budget data so mode changes do not leak prior user state."""
@@ -1028,6 +1030,12 @@ def main() -> None:
     
     # Add logout button in sidebar
     with st.sidebar:
+        st.checkbox(
+            "Compact amount rows (mobile)",
+            key="compact_amount_rows",
+            help="Enable this in app/webview if bill and amount fields stack vertically.",
+        )
+
         if is_guest:
             st.caption("Guest mode")
             if st.button("Sign In", key="guest_to_login"):
@@ -1283,23 +1291,24 @@ def main() -> None:
 
             period_entries: list[dict[str, float | str]] = []
             if selected_bills:
+                compact_amount_rows = bool(st.session_state.get("compact_amount_rows", False))
                 for idx, bill_name in enumerate(selected_bills):
                     amount_key = f"amount_input_{period}_{bill_name}"
                     default_amount = float(st.session_state.period_amount_cache[period].get(bill_name, 0.0))
                     if amount_key not in st.session_state:
                         st.session_state[amount_key] = f"{default_amount:.2f}"
 
-                    # Keep desktop unchanged; only tighten row sizing on mobile/webview.
-                    column_spec = [2, 3] if not mobile_client else [1, 2]
+                    # Keep desktop unchanged; allow explicit compact mode for app/webview.
+                    column_spec = [1, 2] if compact_amount_rows else [2, 3]
                     name_col, amount_col = st.columns(column_spec)
                     with name_col:
-                        bill_label = bill_name if not mobile_client else (bill_name if len(bill_name) <= 10 else f"{bill_name[:9]}…")
+                        bill_label = bill_name if not compact_amount_rows else (bill_name if len(bill_name) <= 10 else f"{bill_name[:9]}…")
                         if st.button(
                             bill_label,
                             key=f"select_bill_{period}_{bill_name}",
                             type="primary" if st.session_state.get(delete_select_key) == bill_name else "secondary",
-                            use_container_width=mobile_client,
-                            help=bill_name if mobile_client else None,
+                            use_container_width=compact_amount_rows,
+                            help=bill_name if compact_amount_rows else None,
                         ):
                             if st.session_state.get(delete_select_key) == bill_name:
                                 st.session_state.pop(delete_select_key, None)
