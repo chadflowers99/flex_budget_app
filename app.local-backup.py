@@ -878,11 +878,11 @@ def main() -> None:
             }
 
             div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div:first-child {
-                flex: 0 0 58% !important;
+                flex: 0 0 52% !important;
             }
 
             div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div:last-child {
-                flex: 0 0 42% !important;
+                flex: 0 0 48% !important;
             }
         }
         </style>
@@ -1147,13 +1147,13 @@ def main() -> None:
                     if amount_key not in st.session_state:
                         st.session_state[amount_key] = f"{default_amount:.2f}"
 
-                    name_col, amount_col = st.columns([3, 2])
+                    name_col, amount_col = st.columns([2, 3])
                     with name_col:
                         if st.button(
                             bill_name,
                             key=f"select_bill_{period}_{bill_name}",
                             type="primary" if st.session_state.get(delete_select_key) == bill_name else "secondary",
-                            use_container_width=True,
+                            use_container_width=False,
                         ):
                             if st.session_state.get(delete_select_key) == bill_name:
                                 st.session_state.pop(delete_select_key, None)
