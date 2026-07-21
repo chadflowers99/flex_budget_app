@@ -267,6 +267,11 @@ def auth_ui():
     # Handle OAuth callback from Supabase (PKCE flow).
     auth_code = st.query_params.get("code")
     if auth_code:
+        # If user is already authenticated, ignore stale callback codes from refresh.
+        if st.session_state.get("user"):
+            st.query_params.clear()
+            st.rerun()
+
         try:
             response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
             if response and response.user:
@@ -283,6 +288,20 @@ def auth_ui():
                 st.session_state.pop("oauth_url", None)
                 st.query_params.clear()
         except Exception as e:
+            # A refresh can replay an already-consumed auth code; if a valid session exists,
+            # continue silently instead of surfacing a false login failure.
+            try:
+                session_response = supabase.auth.get_session()
+                session = getattr(session_response, "session", None)
+                if session and getattr(session, "user", None):
+                    st.session_state.user = session.user
+                    st.session_state.access_token = getattr(session, "access_token", None)
+                    st.session_state.pop("oauth_url", None)
+                    st.query_params.clear()
+                    st.rerun()
+            except Exception:
+                pass
+
             st.error(f"Login attempt failed: {str(e)}")
             st.session_state.pop("oauth_url", None)
             st.query_params.clear()
@@ -595,6 +614,14 @@ def parse_numeric_text(value: str | float | int | None, allow_expression: bool =
             except Exception:
                 return 0.0
         return 0.0
+
+
+def compact_bill_label(bill_name: str, max_chars: int = 10) -> str:
+    """Return a short display label so bill selector buttons stay compact."""
+    normalized = str(bill_name).strip()
+    if len(normalized) <= max_chars:
+        return normalized
+    return f"{normalized[:max_chars - 1]}…"
 
 
 def build_weekly_snapshot_csv(period: str, bills_df: pd.DataFrame, cash_flow: float, net_cash_flow: float) -> str:
@@ -1158,6 +1185,7 @@ def main() -> None:
                             f"Add bill to {period_label}",
                             key=add_input_key,
                             placeholder="internet",
+                            max_chars=24,
                             label_visibility="collapsed",
                         )
                     with add_col2:
@@ -1226,10 +1254,12 @@ def main() -> None:
 
                     name_col, amount_col = st.columns([2, 3])
                     with name_col:
+                        bill_button_label = compact_bill_label(bill_name, max_chars=10)
                         if st.button(
-                            bill_name,
+                            bill_button_label,
                             key=f"select_bill_{period}_{bill_name}",
                             type="primary" if st.session_state.get(delete_select_key) == bill_name else "secondary",
+                            help=bill_name,
                             use_container_width=False,
                         ):
                             if st.session_state.get(delete_select_key) == bill_name:
