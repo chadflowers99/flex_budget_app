@@ -1252,29 +1252,27 @@ def main() -> None:
                     if amount_key not in st.session_state:
                         st.session_state[amount_key] = f"{default_amount:.2f}"
 
-                    name_col, amount_col = st.columns([2, 3])
-                    with name_col:
-                        bill_button_label = compact_bill_label(bill_name, max_chars=10)
-                        if st.button(
-                            bill_button_label,
-                            key=f"select_bill_{period}_{bill_name}",
-                            type="primary" if st.session_state.get(delete_select_key) == bill_name else "secondary",
-                            help=bill_name,
-                            use_container_width=False,
-                        ):
-                            if st.session_state.get(delete_select_key) == bill_name:
-                                st.session_state.pop(delete_select_key, None)
-                            else:
-                                st.session_state[delete_select_key] = bill_name
-                            st.session_state.pop(confirm_delete_key, None)
-                            st.rerun()
-                    with amount_col:
-                        amount_value = st.text_input(
-                            f"{bill_name} amount",
-                            key=amount_key,
-                            label_visibility="collapsed",
-                            placeholder="0.00",
-                        )
+                    bill_button_label = compact_bill_label(bill_name, max_chars=10)
+                    if st.button(
+                        bill_button_label,
+                        key=f"select_bill_{period}_{bill_name}",
+                        type="primary" if st.session_state.get(delete_select_key) == bill_name else "secondary",
+                        help=bill_name,
+                        use_container_width=False,
+                    ):
+                        if st.session_state.get(delete_select_key) == bill_name:
+                            st.session_state.pop(delete_select_key, None)
+                        else:
+                            st.session_state[delete_select_key] = bill_name
+                        st.session_state.pop(confirm_delete_key, None)
+                        st.rerun()
+
+                    amount_value = st.text_input(
+                        f"{bill_name} amount",
+                        key=amount_key,
+                        label_visibility="collapsed",
+                        placeholder="0.00",
+                    )
                     period_entries.append({"bill": bill_name, "amount": parse_numeric_text(amount_value)})
 
             edited_period = pd.DataFrame(period_entries, columns=["bill", "amount"])
