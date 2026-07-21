@@ -1191,15 +1191,31 @@ def main() -> None:
             st.session_state.cash_flow_by_period[period] = period_cash_flow_value
             period_remaining = period_cash_flow_value - period_total
             period_totals[period] = period_total
-            total_col, net_col = st.columns(2)
-            total_col.metric(f"Total bills for {period_label}", f"${period_total:,.2f}")
-            net_col.metric(f"Net cash flow for {period_label}", f"${period_remaining:,.2f}")
 
             cue_color = "#15803d" if period_remaining >= 0 else "#b91c1c"
             cue_text = "positive" if period_remaining >= 0 else "negative"
+
+            total_col, net_col = st.columns(2)
+            with total_col:
+                st.markdown(
+                    f"<div style='font-size:0.78rem;color:#6b7280;font-weight:600;'>Total bills for {period_label}</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    f"<div style='font-size:1.05rem;font-weight:600;'>${period_total:,.2f}</div>",
+                    unsafe_allow_html=True,
+                )
             with net_col:
                 st.markdown(
+                    f"<div style='font-size:1.02rem;font-weight:700;'>Net cash flow for {period_label}</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
                     f"<div style='font-size:0.8rem;color:{cue_color};font-weight:600;'>Net cue: {cue_text}</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    f"<div style='font-size:1.6rem;font-weight:800;'>${period_remaining:,.2f}</div>",
                     unsafe_allow_html=True,
                 )
 
