@@ -872,13 +872,25 @@ def main() -> None:
             overflow-x: hidden !important;
         }
 
-        /* Ensure bill selector buttons can shrink without widening the page. */
-        div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) button {
-            width: 100% !important;
+        /* Keep bill selector buttons compact inside amount rows. */
+        div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div:first-child button {
+            width: auto !important;
+            max-width: 100% !important;
+            min-width: 0 !important;
+            padding: 0.1rem 0.4rem !important;
+            min-height: 1.6rem !important;
+            font-size: 0.76rem !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
             white-space: nowrap !important;
-            font-size: 0.85rem !important;
+        }
+
+        /* Allow amount input controls to shrink to column width on mobile. */
+        div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div:last-child,
+        div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div:last-child div[data-baseweb="input"] {
+            min-width: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
         }
 
         /* Stack general multi-column rows on small screens to prevent overflow. */
