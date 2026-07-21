@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 # MUST BE FIRST STREAMLIT COMMAND
-st.set_page_config(page_title="Portfolio brand.", layout="centered")
+st.set_page_config(page_title="Portfolio brand.", layout="wide")
 
 import ast
 import calendar
