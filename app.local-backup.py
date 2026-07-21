@@ -1147,7 +1147,7 @@ def main() -> None:
                     if amount_key not in st.session_state:
                         st.session_state[amount_key] = f"{default_amount:.2f}"
 
-                    name_col, amount_col = st.columns([3, 2])
+                    name_col, amount_col = st.columns([2, 3])
                     with name_col:
                         if st.button(
                             bill_name,
