@@ -823,7 +823,7 @@ def main() -> None:
         /* Keep bill name + amount visually grouped instead of spanning full row width. */
         div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) {
             max-width: 34rem !important;
-            gap: 0.2rem !important;
+            gap: 0.45rem !important;
             align-items: center !important;
             margin-left: 0 !important;
             margin-right: auto !important;
@@ -842,7 +842,7 @@ def main() -> None:
             div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) {
                 flex-wrap: nowrap !important;
                 align-items: center !important;
-                gap: 0.2rem !important;
+                gap: 0.45rem !important;
             }
 
             div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div {
@@ -1129,7 +1129,7 @@ def main() -> None:
                             bill_name,
                             key=f"select_bill_{period}_{bill_name}",
                             type="primary" if st.session_state.get(delete_select_key) == bill_name else "secondary",
-                            use_container_width=True,
+                            use_container_width=False,
                         ):
                             if st.session_state.get(delete_select_key) == bill_name:
                                 st.session_state.pop(delete_select_key, None)
