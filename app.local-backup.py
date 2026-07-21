@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import streamlit as st
 
 # MUST BE FIRST STREAMLIT COMMAND
@@ -17,16 +18,46 @@ import pandas as pd
 from supabase import create_client, Client
 from supabase.client import ClientOptions
 
+BASE_DIR = Path(__file__).resolve().parent
+
+
+def load_env_fallback(env_path: Path) -> None:
+    """Load KEY=VALUE pairs from .env into os.environ when not already set."""
+    if not env_path.exists():
+        return
+
+    try:
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+    except OSError:
+        # Keep startup resilient if .env cannot be read.
+        return
+
+
+load_env_fallback(BASE_DIR / ".env")
+
 # Load Supabase credentials from secrets.
 supabase_block = st.secrets.get("supabase", {})
 
 SUPABASE_URL = (
     st.secrets.get("SUPABASE_URL")
+    or os.getenv("SUPABASE_URL")
+    or os.getenv("EXPO_PUBLIC_SUPABASE_URL")
     or supabase_block.get("SUPABASE_URL")
     or supabase_block.get("url")
 )
 SUPABASE_ANON_KEY = (
     st.secrets.get("SUPABASE_ANON_KEY")
+    or os.getenv("SUPABASE_ANON_KEY")
+    or os.getenv("SUPABASE_KEY")
+    or os.getenv("EXPO_PUBLIC_SUPABASE_ANON_KEY")
     or st.secrets.get("SUPABASE_KEY")
     or supabase_block.get("SUPABASE_ANON_KEY")
     or supabase_block.get("SUPABASE_KEY")
@@ -66,8 +97,6 @@ if "your_anon_key_here" in SUPABASE_ANON_KEY.lower():
     )
     st.stop()
 
-
-BASE_DIR = Path(__file__).resolve().parent
 AUTH_STORAGE_FILE = BASE_DIR / ".streamlit" / "supabase_auth_storage.json"
 AUTH_STORAGE_FILE_FALLBACK = Path(tempfile.gettempdir()) / "flex_budget_app_supabase_auth_storage.json"
 
@@ -350,7 +379,6 @@ def auth_ui():
         with auth_tab3:
             # Skip button rendering during callback (callback handler processes it above)
             if not (st.query_params.get("code") or st.query_params.get("error")):
-                st.info("Click the button below to sign in with Google")
                 redirect_to = _resolve_oauth_redirect_url()
                 
                 # Cache the OAuth URL to avoid regenerating the PKCE verifier on each render
@@ -1009,21 +1037,15 @@ def main() -> None:
 
     bill_tabs = st.tabs([period_labels[period] for period in periods])
     rebuilt_bills: list[pd.DataFrame] = []
-    period_totals: dict[str, float] = {
-        period: float(
-            pd.to_numeric(
-                st.session_state.bills[st.session_state.bills["period"] == period]["amount"],
-                errors="coerce",
-            ).fillna(0.0).sum()
-        )
-        for period in periods
-    }
+    period_totals: dict[str, float] = {period: 0.0 for period in periods}
+
     for i, period in enumerate(periods):
         with bill_tabs[i]:
             period_label = period_labels[period]
             period_rows = st.session_state.bills[st.session_state.bills["period"] == period][["bill", "amount"]].copy()
             grouped = period_rows.groupby("bill", as_index=False)["amount"].sum() if not period_rows.empty else pd.DataFrame(columns=["bill", "amount"])
             existing_bill_set = set(grouped["bill"].astype(str).tolist()) if not grouped.empty else set()
+            # Keep a stable order across refreshes by following persistent catalog order.
             existing_bills = [bill for bill in bill_catalog if bill in existing_bill_set]
 
             if period not in st.session_state.period_amount_cache:
@@ -1039,6 +1061,7 @@ def main() -> None:
             if selected_key not in st.session_state:
                 st.session_state[selected_key] = existing_bills.copy()
             else:
+                # Trust the current session state; only filter out bills removed from catalog
                 st.session_state[selected_key] = [bill for bill in st.session_state[selected_key] if bill in bill_catalog]
 
             selected_bills = st.session_state[selected_key]
@@ -1111,6 +1134,7 @@ def main() -> None:
 
             selected_bills = st.session_state[selected_key]
 
+            # Keep cache aligned with currently selected bills for this period.
             st.session_state.period_amount_cache[period] = {
                 bill_name: float(cache_for_period.get(bill_name, 0.0)) for bill_name in selected_bills
             }
@@ -1154,18 +1178,19 @@ def main() -> None:
 
             period_total = float(pd.to_numeric(cleaned_period["amount"], errors="coerce").fillna(0.0).sum())
             cash_flow_expr_key = f"cash_flow_expr_{period}"
+            
             period_cash_flow = st.text_input(
                 "Enter cash flow",
                 value=st.session_state.cash_flow_expressions.get(period, ""),
                 key=cash_flow_expr_key,
                 placeholder="0.00",
             )
+            # Sync changes back to expression storage
             st.session_state.cash_flow_expressions[period] = period_cash_flow
             period_cash_flow_value = parse_numeric_text(period_cash_flow, allow_expression=True)
             st.session_state.cash_flow_by_period[period] = period_cash_flow_value
             period_remaining = period_cash_flow_value - period_total
             period_totals[period] = period_total
-
             total_col, net_col = st.columns(2)
             total_col.metric(f"Total bills for {period_label}", f"${period_total:,.2f}")
             net_col.metric(f"Net cash flow for {period_label}", f"${period_remaining:,.2f}")
