@@ -941,8 +941,8 @@ def main() -> None:
 
         /* Keep bill name + amount visually grouped instead of spanning full row width. */
         div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) {
-            max-width: 34rem !important;
-            gap: 0.45rem !important;
+            max-width: 48rem !important;
+            gap: 0.65rem !important;
             align-items: center !important;
             margin-left: 0 !important;
             margin-right: auto !important;
@@ -1325,8 +1325,8 @@ def main() -> None:
                     if amount_key not in st.session_state:
                         st.session_state[amount_key] = f"{default_amount:.2f}"
 
-                    # Give the amount input more horizontal room on desktop.
-                    name_col, amount_col = st.columns([1, 5], gap="small")
+                    # Keep side-by-side layout while preserving room for the bill label.
+                    name_col, amount_col = st.columns([2, 4], gap="medium")
                     with name_col:
                         bill_button_label = compact_bill_label(bill_name, max_chars=9)
                         if st.button(
