@@ -423,6 +423,15 @@ def normalize_period(value: str) -> str:
     return str(value).strip().lower()
 
 
+def period_display(value: str) -> str:
+    normalized = normalize_period(value)
+    if normalized.startswith("wk"):
+        suffix = normalized[2:]
+        if suffix.isdigit():
+            return f"W{int(suffix)}"
+    return normalized.upper()
+
+
 # Supabase load functions (replaces CSV loading)
 def load_bills_from_supabase(user_id: str) -> pd.DataFrame:
     """Load bills from Supabase for the authenticated user."""
@@ -580,7 +589,7 @@ def build_weekly_snapshot_csv(period: str, bills_df: pd.DataFrame, cash_flow: fl
         ]
     )
     out = pd.concat([snapshot_rows, totals], ignore_index=True)
-    out.insert(0, "period", period)
+    out.insert(0, "period", period_display(period))
     return out.to_csv(index=False)
 
 
@@ -932,6 +941,7 @@ def main() -> None:
             }
 
     periods = WEEK_PERIODS.copy()
+    period_labels = {period: period_display(period) for period in periods}
 
     st.subheader("Bills by Period")
     st.caption("Select bills from the dropdown for each week, then edit amounts.")
@@ -978,15 +988,24 @@ def main() -> None:
         bill_catalog = ensure_bill_catalog(DEFAULT_BILLS["bill"].astype(str).tolist())
         st.session_state.bill_catalog = bill_catalog
 
-    bill_tabs = st.tabs(periods)
+    bill_tabs = st.tabs([period_labels[period] for period in periods])
     rebuilt_bills: list[pd.DataFrame] = []
+    period_totals: dict[str, float] = {
+        period: float(
+            pd.to_numeric(
+                st.session_state.bills[st.session_state.bills["period"] == period]["amount"],
+                errors="coerce",
+            ).fillna(0.0).sum()
+        )
+        for period in periods
+    }
 
     for i, period in enumerate(periods):
         with bill_tabs[i]:
+            period_label = period_labels[period]
             period_rows = st.session_state.bills[st.session_state.bills["period"] == period][["bill", "amount"]].copy()
             grouped = period_rows.groupby("bill", as_index=False)["amount"].sum() if not period_rows.empty else pd.DataFrame(columns=["bill", "amount"])
             existing_bill_set = set(grouped["bill"].astype(str).tolist()) if not grouped.empty else set()
-            # Keep a stable order across refreshes by following persistent catalog order.
             existing_bills = [bill for bill in bill_catalog if bill in existing_bill_set]
 
             if period not in st.session_state.period_amount_cache:
@@ -1002,19 +1021,17 @@ def main() -> None:
             if selected_key not in st.session_state:
                 st.session_state[selected_key] = existing_bills.copy()
             else:
-                # Trust the current session state; only filter out bills removed from catalog
                 st.session_state[selected_key] = [bill for bill in st.session_state[selected_key] if bill in bill_catalog]
 
             selected_bills = st.session_state[selected_key]
-
             add_options = [bill for bill in bill_catalog if bill not in selected_bills]
-            period_tabs = st.tabs([f"Select {period} bill", f"Remove {period} bill"])
+            period_tabs = st.tabs([f"Select {period_label} bill", f"Remove {period_label} bill"])
 
             with period_tabs[0]:
                 add_col1, add_col2 = st.columns([4, 1])
                 with add_col1:
                     bill_to_add = st.selectbox(
-                        f"Add bill to {period}",
+                        f"Add bill to {period_label}",
                         options=[""] + add_options,
                         key=f"bill_add_select_{period}",
                         label_visibility="collapsed",
@@ -1029,7 +1046,7 @@ def main() -> None:
                 remove_col1, remove_col2 = st.columns([4, 1])
                 with remove_col1:
                     bill_to_remove = st.selectbox(
-                        f"Remove bill from {period}",
+                        f"Remove bill from {period_label}",
                         options=[""] + selected_bills,
                         key=f"bill_remove_select_{period}",
                         label_visibility="collapsed",
@@ -1045,12 +1062,10 @@ def main() -> None:
                         st.rerun()
 
             selected_bills = st.session_state[selected_key]
-
             confirm_zero_key = f"confirm_zero_{period}"
             if confirm_zero_key not in st.session_state:
                 st.session_state[confirm_zero_key] = False
 
-            # Keep cache aligned with currently selected bills for this period.
             st.session_state.period_amount_cache[period] = {
                 bill_name: float(cache_for_period.get(bill_name, 0.0)) for bill_name in selected_bills
             }
@@ -1086,21 +1101,21 @@ def main() -> None:
 
             period_total = float(pd.to_numeric(cleaned_period["amount"], errors="coerce").fillna(0.0).sum())
             cash_flow_expr_key = f"cash_flow_expr_{period}"
-            
             period_cash_flow = st.text_input(
                 "Enter cash flow",
                 value=st.session_state.cash_flow_expressions.get(period, ""),
                 key=cash_flow_expr_key,
                 placeholder="0.00",
             )
-            # Sync changes back to expression storage
             st.session_state.cash_flow_expressions[period] = period_cash_flow
             period_cash_flow_value = parse_numeric_text(period_cash_flow, allow_expression=True)
             st.session_state.cash_flow_by_period[period] = period_cash_flow_value
             period_remaining = period_cash_flow_value - period_total
+            period_totals[period] = period_total
+
             total_col, net_col = st.columns(2)
-            total_col.metric(f"Total bills for {period}", f"${period_total:,.2f}")
-            net_col.metric(f"Net cash flow for {period}", f"${period_remaining:,.2f}")
+            total_col.metric(f"Total bills for {period_label}", f"${period_total:,.2f}")
+            net_col.metric(f"Net cash flow for {period_label}", f"${period_remaining:,.2f}")
 
             cue_color = "#15803d" if period_remaining >= 0 else "#b91c1c"
             cue_text = "positive" if period_remaining >= 0 else "negative"
@@ -1121,21 +1136,20 @@ def main() -> None:
                 st.download_button(
                     label="Snapshot CSV",
                     data=snapshot_csv.encode("utf-8"),
-                    file_name=f"{period}_snapshot.csv",
+                    file_name=f"{period_label}_snapshot.csv",
                     mime="text/csv",
                     key=f"download_snapshot_{period}",
                     on_click="ignore",
                 )
 
             if st.session_state.get(confirm_zero_key, False):
-                st.warning(f"Refresh amounts for {period}? This will set selected bill amounts and cash flow to 0.00.")
+                st.warning(f"Refresh amounts for {period_label}? This will set selected bill amounts and cash flow to 0.00.")
                 confirm_col, cancel_col = st.columns(2)
                 with confirm_col:
                     if st.button("Confirm refresh", key=f"confirm_zero_btn_{period}", type="primary"):
                         st.session_state.period_amount_cache[period] = {bill_name: 0.0 for bill_name in selected_bills}
                         for bill_name in selected_bills:
                             st.session_state.pop(f"amount_input_{period}_{bill_name}", None)
-                        # Clear cash flow expression and widget state
                         st.session_state.cash_flow_expressions[period] = ""
                         st.session_state.pop(f"cash_flow_expr_{period}", None)
                         st.session_state.cash_flow_by_period[period] = 0.0
@@ -1154,6 +1168,19 @@ def main() -> None:
     st.session_state.bill_catalog = ensure_bill_catalog(
         bill_catalog + st.session_state.bills["bill"].astype(str).tolist()
     )
+
+    st.subheader("Monthly Overview")
+    st.caption("Combined totals for all weeks.")
+
+    monthly_bills_total = sum(float(period_totals.get(period, 0.0)) for period in periods)
+    monthly_cash_flow_total = sum(float(st.session_state.cash_flow_by_period.get(period, 0.0)) for period in periods)
+    monthly_net = monthly_cash_flow_total - monthly_bills_total
+
+    monthly_bills_col, monthly_cash_col, monthly_net_col = st.columns(3)
+    monthly_bills_col.metric("Bills", f"${monthly_bills_total:,.2f}")
+    monthly_cash_col.metric("Cash flow", f"${monthly_cash_flow_total:,.2f}")
+    monthly_net_col.metric("Net", f"${monthly_net:,.2f}")
+
     persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
 
     st.session_state.periods_order = WEEK_PERIODS.copy()
