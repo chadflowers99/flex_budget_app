@@ -687,14 +687,6 @@ def parse_numeric_text(value: str | float | int | None, allow_expression: bool =
         return 0.0
 
 
-def compact_bill_label(bill_name: str, max_chars: int = 10) -> str:
-    """Return a short display label so bill selector buttons stay compact."""
-    normalized = str(bill_name).strip()
-    if len(normalized) <= max_chars:
-        return normalized
-    return f"{normalized[:max_chars - 1]}…"
-
-
 def build_weekly_snapshot_csv(period: str, bills_df: pd.DataFrame, cash_flow: float, net_cash_flow: float) -> str:
     snapshot_rows = bills_df.copy()
     if snapshot_rows.empty:
@@ -939,15 +931,6 @@ def main() -> None:
             border: 0 !important;
         }
 
-        /* Keep bill name + amount visually grouped instead of spanning full row width. */
-        div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) {
-            max-width: 48rem !important;
-            gap: 0.65rem !important;
-            align-items: center !important;
-            margin-left: 0 !important;
-            margin-right: auto !important;
-        }
-
         /* Make bill selector buttons less visually heavy. */
         div[data-testid="stHorizontalBlock"] button[kind="secondary"],
         div[data-testid="stHorizontalBlock"] button[kind="primary"] {
@@ -991,27 +974,6 @@ def main() -> None:
             overflow-x: hidden !important;
         }
 
-        /* Keep bill selector buttons compact inside amount rows. */
-        div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div:first-child button {
-            width: auto !important;
-            max-width: 100% !important;
-            min-width: 0 !important;
-            padding: 0.1rem 0.4rem !important;
-            min-height: 1.6rem !important;
-            font-size: 0.76rem !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            white-space: nowrap !important;
-        }
-
-        /* Allow amount input controls to shrink to column width on mobile. */
-        div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div:last-child,
-        div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div:last-child div[data-baseweb="input"] {
-            min-width: 0 !important;
-            width: 100% !important;
-            max-width: 100% !important;
-        }
-
         /* Stack general multi-column rows on small screens to prevent overflow. */
         @media (max-width: 900px) {
             div[data-testid="stHorizontalBlock"]:not(:has(input[aria-label$="amount"])) {
@@ -1024,7 +986,7 @@ def main() -> None:
             }
         }
 
-        /* Keep bill name + amount rows on one line on narrow screens. */
+        /* Keep tab buttons compact on narrow screens. */
         @media (max-width: 768px) {
             div[data-testid="stTabs"] button[role="tab"] {
                 padding: 0.15rem 0.35rem !important;
@@ -1036,24 +998,6 @@ def main() -> None:
                 padding: 0.15rem 0.35rem !important;
                 font-size: 0.75rem !important;
                 min-height: 1.75rem !important;
-            }
-
-            div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) {
-                flex-wrap: nowrap !important;
-                align-items: center !important;
-                gap: 0.45rem !important;
-            }
-
-            div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div {
-                min-width: 0 !important;
-            }
-
-            div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div:first-child {
-                flex: 0 0 44% !important;
-            }
-
-            div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div:last-child {
-                flex: 0 0 56% !important;
             }
         }
         </style>
@@ -1258,7 +1202,6 @@ def main() -> None:
                             f"Add bill to {period_label}",
                             key=add_input_key,
                             placeholder="internet",
-                            max_chars=24,
                             label_visibility="collapsed",
                         )
                     with add_col2:
@@ -1325,16 +1268,13 @@ def main() -> None:
                     if amount_key not in st.session_state:
                         st.session_state[amount_key] = f"{default_amount:.2f}"
 
-                    # Keep side-by-side layout while preserving room for the bill label.
-                    name_col, amount_col = st.columns([2, 4], gap="medium")
+                    name_col, amount_col = st.columns([2, 3])
                     with name_col:
-                        bill_button_label = compact_bill_label(bill_name, max_chars=9)
                         if st.button(
-                            bill_button_label,
+                            bill_name,
                             key=f"select_bill_{period}_{bill_name}",
                             type="primary" if st.session_state.get(delete_select_key) == bill_name else "secondary",
-                            help=bill_name,
-                            use_container_width=True,
+                            use_container_width=False,
                         ):
                             if st.session_state.get(delete_select_key) == bill_name:
                                 st.session_state.pop(delete_select_key, None)
