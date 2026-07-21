@@ -239,6 +239,26 @@ def _resolve_oauth_redirect_url() -> str:
     return "https://pb-flexbudget.streamlit.app"
 
 
+def is_mobile_client() -> bool:
+    """Best-effort mobile detection from request headers."""
+    try:
+        headers = getattr(st.context, "headers", {})
+        user_agent = str(headers.get("user-agent") or "").lower()
+    except Exception:
+        user_agent = ""
+
+    mobile_signals = [
+        "iphone",
+        "android",
+        "mobile",
+        "ipad",
+        "ipod",
+        "windows phone",
+        "webview",
+    ]
+    return any(signal in user_agent for signal in mobile_signals)
+
+
 # Initialize Supabase client with session-scoped storage backend.
 def get_supabase_client() -> Client:
     if "_supabase_client" not in st.session_state:
@@ -884,6 +904,7 @@ def main() -> None:
         st.session_state.access_token = None
 
     user_id = user.id if user else ""
+    mobile_client = is_mobile_client()
 
     def reset_budget_state() -> None:
         """Drop cached budget data so mode changes do not leak prior user state."""
@@ -1268,13 +1289,17 @@ def main() -> None:
                     if amount_key not in st.session_state:
                         st.session_state[amount_key] = f"{default_amount:.2f}"
 
-                    name_col, amount_col = st.columns([2, 3])
+                    # Keep desktop unchanged; only tighten row sizing on mobile/webview.
+                    column_spec = [2, 3] if not mobile_client else [1, 2]
+                    name_col, amount_col = st.columns(column_spec)
                     with name_col:
+                        bill_label = bill_name if not mobile_client else (bill_name if len(bill_name) <= 10 else f"{bill_name[:9]}…")
                         if st.button(
-                            bill_name,
+                            bill_label,
                             key=f"select_bill_{period}_{bill_name}",
                             type="primary" if st.session_state.get(delete_select_key) == bill_name else "secondary",
-                            use_container_width=False,
+                            use_container_width=mobile_client,
+                            help=bill_name if mobile_client else None,
                         ):
                             if st.session_state.get(delete_select_key) == bill_name:
                                 st.session_state.pop(delete_select_key, None)
