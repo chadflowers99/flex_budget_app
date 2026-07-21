@@ -3,7 +3,7 @@ from __future__ import annotations
 import streamlit as st
 
 # MUST BE FIRST STREAMLIT COMMAND
-st.set_page_config(page_title="Portfolio brand.", layout="wide")
+st.set_page_config(page_title="Portfolio brand.", layout="centered")
 
 import ast
 import calendar
@@ -844,6 +844,12 @@ def main() -> None:
             overflow-x: visible !important;
         }
 
+        div[data-testid="stTabs"] div[data-baseweb="tab-list"] {
+            gap: 0.2rem !important;
+            flex-wrap: wrap !important;
+            overflow-x: visible !important;
+        }
+
         div[data-testid="stTabs"] button[role="tab"] {
             padding: 0.2rem 0.45rem !important;
             font-size: 0.82rem !important;
@@ -851,9 +857,51 @@ def main() -> None:
             white-space: nowrap !important;
         }
 
+        div[data-testid="stTabs"] button[data-baseweb="tab"] {
+            padding: 0.2rem 0.45rem !important;
+            font-size: 0.82rem !important;
+            min-height: 1.9rem !important;
+            white-space: nowrap !important;
+            min-width: 0 !important;
+        }
+
+        /* Keep content constrained to viewport width. */
+        [data-testid="stAppViewContainer"],
+        .main,
+        section.main {
+            overflow-x: hidden !important;
+        }
+
+        /* Ensure bill selector buttons can shrink without widening the page. */
+        div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) button {
+            width: 100% !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+            font-size: 0.85rem !important;
+        }
+
+        /* Stack general multi-column rows on small screens to prevent overflow. */
+        @media (max-width: 900px) {
+            div[data-testid="stHorizontalBlock"]:not(:has(input[aria-label$="amount"])) {
+                flex-wrap: wrap !important;
+            }
+
+            div[data-testid="stHorizontalBlock"]:not(:has(input[aria-label$="amount"])) > div[data-testid="column"] {
+                min-width: 100% !important;
+                flex: 1 1 100% !important;
+            }
+        }
+
         /* Keep bill name + amount rows on one line on narrow screens. */
         @media (max-width: 768px) {
             div[data-testid="stTabs"] button[role="tab"] {
+                padding: 0.15rem 0.35rem !important;
+                font-size: 0.75rem !important;
+                min-height: 1.75rem !important;
+            }
+
+            div[data-testid="stTabs"] button[data-baseweb="tab"] {
                 padding: 0.15rem 0.35rem !important;
                 font-size: 0.75rem !important;
                 min-height: 1.75rem !important;
@@ -870,11 +918,11 @@ def main() -> None:
             }
 
             div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div:first-child {
-                flex: 0 0 52% !important;
+                flex: 0 0 44% !important;
             }
 
             div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) > div:last-child {
-                flex: 0 0 48% !important;
+                flex: 0 0 56% !important;
             }
         }
         </style>
