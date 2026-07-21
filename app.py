@@ -244,8 +244,13 @@ def is_mobile_client() -> bool:
     try:
         headers = getattr(st.context, "headers", {})
         user_agent = str(headers.get("user-agent") or "").lower()
+        ch_mobile = str(headers.get("sec-ch-ua-mobile") or "").strip().lower()
     except Exception:
         user_agent = ""
+        ch_mobile = ""
+
+    if ch_mobile == "?1":
+        return True
 
     mobile_signals = [
         "iphone",
@@ -255,6 +260,11 @@ def is_mobile_client() -> bool:
         "ipod",
         "windows phone",
         "webview",
+        " wv",
+        "okhttp",
+        "flutter",
+        "dart",
+        "cfnetwork",
     ]
     return any(signal in user_agent for signal in mobile_signals)
 
@@ -907,6 +917,15 @@ def main() -> None:
     mobile_client = is_mobile_client()
     if "compact_amount_rows" not in st.session_state:
         st.session_state.compact_amount_rows = mobile_client
+    if "compact_amount_rows_manual" not in st.session_state:
+        st.session_state.compact_amount_rows_manual = False
+    if "compact_amount_rows_ui" not in st.session_state:
+        st.session_state.compact_amount_rows_ui = bool(st.session_state.compact_amount_rows)
+
+    # Keep app behavior in sync with detected client unless user explicitly overrides it.
+    if not bool(st.session_state.get("compact_amount_rows_manual", False)):
+        st.session_state.compact_amount_rows = mobile_client
+        st.session_state.compact_amount_rows_ui = mobile_client
 
     def reset_budget_state() -> None:
         """Drop cached budget data so mode changes do not leak prior user state."""
@@ -1032,9 +1051,12 @@ def main() -> None:
     with st.sidebar:
         st.checkbox(
             "Compact amount rows (mobile)",
-            key="compact_amount_rows",
+            key="compact_amount_rows_ui",
             help="Enable this in app/webview if bill and amount fields stack vertically.",
         )
+        if bool(st.session_state.get("compact_amount_rows_ui", False)) != bool(st.session_state.get("compact_amount_rows", False)):
+            st.session_state.compact_amount_rows = bool(st.session_state.get("compact_amount_rows_ui", False))
+            st.session_state.compact_amount_rows_manual = True
 
         if is_guest:
             st.caption("Guest mode")
