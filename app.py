@@ -231,8 +231,29 @@ def auth_ui():
     if st.session_state.user:
         return st.session_state.user
 
-    # Privacy-first behavior: do not auto-restore an existing auth session.
-    # Users must explicitly choose to sign in from the landing page.
+    # Restore persisted Supabase session so browser refresh keeps users logged in.
+    try:
+        session_response = supabase.auth.get_session()
+        session = getattr(session_response, "session", None)
+        if session and getattr(session, "access_token", None):
+            access_token = session.access_token
+            refresh_token = getattr(session, "refresh_token", None)
+            if refresh_token:
+                supabase.auth.set_session(access_token, refresh_token)
+
+            user = getattr(session, "user", None)
+            if not user and access_token:
+                user_response = supabase.auth.get_user(access_token)
+                user = getattr(user_response, "user", None)
+
+            if user:
+                st.session_state.user = user
+                st.session_state.access_token = access_token
+                st.session_state.show_auth_form = False
+                return user
+    except Exception:
+        # If restore fails, continue to explicit login UI.
+        pass
 
     oauth_error = st.query_params.get("error")
     oauth_error_description = st.query_params.get("error_description")
