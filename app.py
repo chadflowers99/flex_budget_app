@@ -837,8 +837,28 @@ def main() -> None:
             min-height: 2rem !important;
         }
 
+        /* Keep period tabs compact to avoid horizontal page scrolling. */
+        div[data-testid="stTabs"] ul[role="tablist"] {
+            gap: 0.2rem !important;
+            flex-wrap: wrap !important;
+            overflow-x: visible !important;
+        }
+
+        div[data-testid="stTabs"] button[role="tab"] {
+            padding: 0.2rem 0.45rem !important;
+            font-size: 0.82rem !important;
+            min-height: 1.9rem !important;
+            white-space: nowrap !important;
+        }
+
         /* Keep bill name + amount rows on one line on narrow screens. */
         @media (max-width: 768px) {
+            div[data-testid="stTabs"] button[role="tab"] {
+                padding: 0.15rem 0.35rem !important;
+                font-size: 0.75rem !important;
+                min-height: 1.75rem !important;
+            }
+
             div[data-testid="stHorizontalBlock"]:has(input[aria-label$="amount"]) {
                 flex-wrap: nowrap !important;
                 align-items: center !important;
