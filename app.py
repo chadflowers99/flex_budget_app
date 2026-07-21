@@ -70,6 +70,8 @@ if "your_anon_key_here" in SUPABASE_ANON_KEY.lower():
 BASE_DIR = Path(__file__).resolve().parent
 AUTH_STORAGE_FILE = BASE_DIR / ".streamlit" / "supabase_auth_storage.json"
 AUTH_STORAGE_FILE_FALLBACK = Path(tempfile.gettempdir()) / "flex_budget_app_supabase_auth_storage.json"
+AUTH_SESSION_FILE = BASE_DIR / ".streamlit" / "auth_session_tokens.json"
+AUTH_SESSION_FILE_FALLBACK = Path(tempfile.gettempdir()) / "flex_budget_app_auth_session_tokens.json"
 
 
 class MemoryAuthStorage:
@@ -129,7 +131,7 @@ class FileAuthStorage:
         try:
             self.storage_file.parent.mkdir(parents=True, exist_ok=True)
             self.storage_file.write_text(json.dumps(data), encoding="utf-8")
-        except OSError:
+        except Exception:
             pass  # File write failed, but session_state has it
 
     def get_item(self, key):
@@ -165,6 +167,52 @@ def _build_auth_storage():
     if _is_writable(AUTH_STORAGE_FILE_FALLBACK):
         return FileAuthStorage(AUTH_STORAGE_FILE_FALLBACK)
     return SessionStateAuthStorage()
+
+
+def _auth_session_path() -> Path | None:
+    if _is_writable(AUTH_SESSION_FILE):
+        return AUTH_SESSION_FILE
+    if _is_writable(AUTH_SESSION_FILE_FALLBACK):
+        return AUTH_SESSION_FILE_FALLBACK
+    return None
+
+
+def _save_auth_session_tokens(access_token: str | None, refresh_token: str | None) -> None:
+    if not access_token or not refresh_token:
+        return
+    path = _auth_session_path()
+    if not path:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _load_auth_session_tokens() -> tuple[str | None, str | None]:
+    path = _auth_session_path()
+    if not path or not path.exists():
+        return None, None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        access_token = str(payload.get("access_token") or "").strip() or None
+        refresh_token = str(payload.get("refresh_token") or "").strip() or None
+        return access_token, refresh_token
+    except Exception:
+        return None, None
+
+
+def _clear_auth_session_tokens() -> None:
+    for path in [AUTH_SESSION_FILE, AUTH_SESSION_FILE_FALLBACK]:
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def _resolve_oauth_redirect_url() -> str:
@@ -250,10 +298,26 @@ def auth_ui():
                 st.session_state.user = user
                 st.session_state.access_token = access_token
                 st.session_state.show_auth_form = False
+                _save_auth_session_tokens(access_token, refresh_token)
                 return user
     except Exception:
         # If restore fails, continue to explicit login UI.
         pass
+
+    # Fallback restore path for webviews where SDK storage can be flaky across refresh.
+    fallback_access_token, fallback_refresh_token = _load_auth_session_tokens()
+    if fallback_access_token and fallback_refresh_token:
+        try:
+            supabase.auth.set_session(fallback_access_token, fallback_refresh_token)
+            user_response = supabase.auth.get_user(fallback_access_token)
+            user = getattr(user_response, "user", None)
+            if user:
+                st.session_state.user = user
+                st.session_state.access_token = fallback_access_token
+                st.session_state.show_auth_form = False
+                return user
+        except Exception:
+            pass
 
     oauth_error = st.query_params.get("error")
     oauth_error_description = st.query_params.get("error_description")
@@ -280,6 +344,7 @@ def auth_ui():
                 # Set the session on the Supabase client so RLS works
                 if response.session:
                     supabase.auth.set_session(response.session.access_token, response.session.refresh_token)
+                    _save_auth_session_tokens(response.session.access_token, response.session.refresh_token)
                 st.session_state.pop("oauth_url", None)
                 st.query_params.clear()
                 st.rerun()
@@ -296,6 +361,10 @@ def auth_ui():
                 if session and getattr(session, "user", None):
                     st.session_state.user = session.user
                     st.session_state.access_token = getattr(session, "access_token", None)
+                    _save_auth_session_tokens(
+                        getattr(session, "access_token", None),
+                        getattr(session, "refresh_token", None),
+                    )
                     st.session_state.pop("oauth_url", None)
                     st.query_params.clear()
                     st.rerun()
@@ -362,6 +431,7 @@ def auth_ui():
                     st.session_state.access_token = response.session.access_token
                     # Set the session on the Supabase client so RLS works
                     supabase.auth.set_session(response.session.access_token, response.session.refresh_token)
+                    _save_auth_session_tokens(response.session.access_token, response.session.refresh_token)
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login attempt failed: {str(e)}")
@@ -383,6 +453,7 @@ def auth_ui():
                         st.session_state.access_token = response.session.access_token
                         # Set the session on the Supabase client so RLS works
                         supabase.auth.set_session(response.session.access_token, response.session.refresh_token)
+                        _save_auth_session_tokens(response.session.access_token, response.session.refresh_token)
                     st.success("Account created! Log in with your credentials.")
                 except Exception as e:
                     st.error(f"Sign up failed: {str(e)}")
@@ -1002,6 +1073,7 @@ def main() -> None:
         else:
             if st.button("Use Guest Mode", key="switch_to_guest"):
                 supabase.auth.sign_out()
+                _clear_auth_session_tokens()
                 st.session_state.user = None
                 st.session_state.access_token = None
                 st.session_state.guest_mode = True
@@ -1011,6 +1083,7 @@ def main() -> None:
                 st.rerun()
             if st.button("Logout"):
                 supabase.auth.sign_out()
+                _clear_auth_session_tokens()
                 st.session_state.user = None
                 st.session_state.access_token = None
                 st.session_state.show_auth_form = False
@@ -1252,7 +1325,8 @@ def main() -> None:
                     if amount_key not in st.session_state:
                         st.session_state[amount_key] = f"{default_amount:.2f}"
 
-                    name_col, amount_col = st.columns([2, 3], gap="small")
+                    # Give the amount input more horizontal room on desktop.
+                    name_col, amount_col = st.columns([1, 5], gap="small")
                     with name_col:
                         bill_button_label = compact_bill_label(bill_name, max_chars=9)
                         if st.button(
