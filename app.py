@@ -10,6 +10,7 @@ import calendar
 import json
 import operator
 import tempfile
+import time
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -262,6 +263,8 @@ def auth_ui():
         st.session_state.show_auth_form = False
     if "auth_notice" not in st.session_state:
         st.session_state.auth_notice = ""
+    if "oauth_force_refresh" not in st.session_state:
+        st.session_state.oauth_force_refresh = False
 
     if st.session_state.guest_mode:
         st.session_state.user = None
@@ -348,6 +351,8 @@ def auth_ui():
                 # Reset callback state and send user back to a fresh OAuth start.
                 st.session_state.pop("oauth_url", None)
                 st.session_state.pop("oauth_redirect_to", None)
+                st.session_state.pop("oauth_url_created_at", None)
+                st.session_state.oauth_force_refresh = True
                 st.session_state.show_auth_form = True
                 st.session_state.auth_notice = "Login link expired. Tap Google sign-in again."
                 st.query_params.clear()
@@ -450,9 +455,13 @@ def auth_ui():
                 redirect_to = _resolve_oauth_redirect_url()
                 
                 # Cache the OAuth URL to avoid regenerating the PKCE verifier on each render
+                oauth_url_created_at = float(st.session_state.get("oauth_url_created_at", 0.0) or 0.0)
+                oauth_link_is_stale = (time.time() - oauth_url_created_at) > 300
                 should_refresh_oauth = (
                     "oauth_url" not in st.session_state
                     or st.session_state.get("oauth_redirect_to") != redirect_to
+                    or oauth_link_is_stale
+                    or bool(st.session_state.get("oauth_force_refresh"))
                 )
                 if should_refresh_oauth:
                     try:
@@ -464,6 +473,8 @@ def auth_ui():
                         )
                         st.session_state.oauth_url = response.url if (response and hasattr(response, 'url')) else None
                         st.session_state.oauth_redirect_to = redirect_to
+                        st.session_state.oauth_url_created_at = time.time()
+                        st.session_state.oauth_force_refresh = False
                     except Exception as e:
                         st.error(f"Google sign in error: {str(e)}")
                 
