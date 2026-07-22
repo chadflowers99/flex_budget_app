@@ -260,6 +260,8 @@ def auth_ui():
         st.session_state.guest_mode = False
     if "show_auth_form" not in st.session_state:
         st.session_state.show_auth_form = False
+    if "auth_notice" not in st.session_state:
+        st.session_state.auth_notice = ""
 
     if st.session_state.guest_mode:
         st.session_state.user = None
@@ -295,11 +297,12 @@ def auth_ui():
     oauth_error = st.query_params.get("error")
     oauth_error_description = st.query_params.get("error_description")
     if oauth_error:
-        st.error(
+        st.session_state.auth_notice = (
             f"Login attempt failed: {oauth_error}"
             + (f" ({oauth_error_description})" if oauth_error_description else "")
         )
         st.query_params.clear()
+        st.rerun()
 
     # Handle OAuth callback from Supabase (PKCE flow).
     auth_code = st.query_params.get("code")
@@ -346,9 +349,9 @@ def auth_ui():
                 st.session_state.pop("oauth_url", None)
                 st.session_state.pop("oauth_redirect_to", None)
                 st.session_state.show_auth_form = True
+                st.session_state.auth_notice = "Login link expired. Tap Google sign-in again."
                 st.query_params.clear()
-                st.warning("Login link expired. Tap Google sign-in again.")
-                return None
+                st.rerun()
 
             st.error(f"Login attempt failed: {str(e)}")
             st.session_state.pop("oauth_url", None)
@@ -365,6 +368,11 @@ def auth_ui():
         """,
         unsafe_allow_html=True,
     )
+
+    notice = str(st.session_state.get("auth_notice") or "").strip()
+    if notice:
+        st.warning(notice)
+        st.session_state.auth_notice = ""
 
     landing_col1, landing_col2 = st.columns(2)
     with landing_col1:
