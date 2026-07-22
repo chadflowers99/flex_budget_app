@@ -245,6 +245,7 @@ def app_today() -> date:
 
     Optional override: set APP_TIMEZONE in Streamlit secrets (e.g. America/Chicago).
     """
+    # Prefer explicit app setting.
     timezone_name = st.secrets.get("APP_TIMEZONE")
     if isinstance(timezone_name, str) and timezone_name.strip():
         try:
@@ -252,7 +253,31 @@ def app_today() -> date:
         except Exception:
             pass
 
-    return datetime.now().astimezone().date()
+    # Next, try common proxy/browser timezone headers when available.
+    try:
+        headers = getattr(st.context, "headers", {})
+        timezone_header_keys = [
+            "x-time-zone",
+            "x-timezone",
+            "cf-timezone",
+            "cloudfront-viewer-time-zone",
+        ]
+        for key in timezone_header_keys:
+            header_tz = str(headers.get(key) or "").strip()
+            if not header_tz:
+                continue
+            try:
+                return datetime.now(ZoneInfo(header_tz)).date()
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    # Fallback: choose a US-local timezone to avoid UTC rollover showing next day.
+    try:
+        return datetime.now(ZoneInfo("America/Chicago")).date()
+    except Exception:
+        return datetime.now().astimezone().date()
 
 
 # Initialize Supabase client with session-scoped storage backend.
