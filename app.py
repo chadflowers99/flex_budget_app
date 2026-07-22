@@ -638,37 +638,28 @@ def auth_ui():
             if not (st.query_params.get("code") or st.query_params.get("error")):
                 st.info("Click the button below to sign in with Google")
                 redirect_to = _resolve_oauth_redirect_url()
-                
-                # Cache the OAuth URL to avoid regenerating the PKCE verifier on each render
-                oauth_url_created_at = float(st.session_state.get("oauth_url_created_at", 0.0) or 0.0)
-                oauth_link_is_stale = (time.time() - oauth_url_created_at) > 300
-                should_refresh_oauth = (
-                    "oauth_url" not in st.session_state
-                    or st.session_state.get("oauth_redirect_to") != redirect_to
-                    or oauth_link_is_stale
-                    or bool(st.session_state.get("oauth_force_refresh"))
-                )
-                if should_refresh_oauth:
-                    try:
-                        response = supabase.auth.sign_in_with_oauth(
-                            {
-                                "provider": "google",
-                                "options": {"redirect_to": redirect_to}
-                            }
-                        )
-                        st.session_state.oauth_url = response.url if (response and hasattr(response, "url")) else None
-                        namespace = str(st.session_state.get("_auth_storage_namespace") or "").strip()
-                        if st.session_state.oauth_url and namespace:
-                            parsed = urlparse(st.session_state.oauth_url)
-                            state_values = parse_qs(parsed.query).get("state", [])
-                            oauth_state = str(state_values[0]).strip() if state_values else ""
-                            if oauth_state:
-                                _remember_oauth_state_namespace(oauth_state, namespace)
-                        st.session_state.oauth_redirect_to = redirect_to
-                        st.session_state.oauth_url_created_at = time.time()
-                        st.session_state.oauth_force_refresh = False
-                    except Exception as e:
-                        st.error(f"Google sign in error: {str(e)}")
+
+                # Always generate a fresh OAuth URL to avoid stale PKCE links.
+                try:
+                    response = supabase.auth.sign_in_with_oauth(
+                        {
+                            "provider": "google",
+                            "options": {"redirect_to": redirect_to}
+                        }
+                    )
+                    st.session_state.oauth_url = response.url if (response and hasattr(response, "url")) else None
+                    namespace = str(st.session_state.get("_auth_storage_namespace") or "").strip()
+                    if st.session_state.oauth_url and namespace:
+                        parsed = urlparse(st.session_state.oauth_url)
+                        state_values = parse_qs(parsed.query).get("state", [])
+                        oauth_state = str(state_values[0]).strip() if state_values else ""
+                        if oauth_state:
+                            _remember_oauth_state_namespace(oauth_state, namespace)
+                    st.session_state.oauth_redirect_to = redirect_to
+                    st.session_state.oauth_url_created_at = time.time()
+                    st.session_state.oauth_force_refresh = False
+                except Exception as e:
+                    st.error(f"Google sign in error: {str(e)}")
                 
                 oauth_url = st.session_state.get("oauth_url")
                 if oauth_url:
