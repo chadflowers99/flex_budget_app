@@ -7,6 +7,7 @@ st.set_page_config(page_title="Portfolio brand.", layout="wide")
 
 import ast
 import calendar
+import hashlib
 import json
 import operator
 import tempfile
@@ -106,33 +107,46 @@ class SessionStateAuthStorage:
 
 
 class FileAuthStorage:
-    """File-backed auth storage with session_state fallback for Streamlit Cloud."""
-    def __init__(self, storage_file):
+    """File-backed auth storage isolated by per-client namespace."""
+    def __init__(self, storage_file: Path, namespace: str):
         self.storage_file = storage_file
+        self.namespace = namespace
+
+    def _read_all(self) -> dict:
+        if not self.storage_file.exists():
+            return {}
+        try:
+            data = json.loads(self.storage_file.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _write_all(self, data: dict) -> None:
+        try:
+            self.storage_file.parent.mkdir(parents=True, exist_ok=True)
+            self.storage_file.write_text(json.dumps(data), encoding="utf-8")
+        except Exception:
+            pass
 
     def _read(self):
         # Try session_state first (fastest, survives reruns)
         if "_supabase_auth_store" in st.session_state:
             return st.session_state._supabase_auth_store
-        # Fall back to file
-        if not self.storage_file.exists():
-            return {}
-        try:
-            data = json.loads(self.storage_file.read_text(encoding="utf-8"))
-            st.session_state._supabase_auth_store = data
-            return data
-        except (OSError, json.JSONDecodeError):
-            return {}
+        # Fall back to namespaced storage in file.
+        all_data = self._read_all()
+        data = all_data.get(self.namespace, {})
+        if not isinstance(data, dict):
+            data = {}
+        st.session_state._supabase_auth_store = data
+        return data
 
     def _write(self, data):
         # Always write to session_state (fastest)
         st.session_state._supabase_auth_store = data
-        # Also write to file if possible
-        try:
-            self.storage_file.parent.mkdir(parents=True, exist_ok=True)
-            self.storage_file.write_text(json.dumps(data), encoding="utf-8")
-        except Exception:
-            pass  # File write failed, but session_state has it
+        # Also write to file under this namespace.
+        all_data = self._read_all()
+        all_data[self.namespace] = data
+        self._write_all(all_data)
 
     def get_item(self, key):
         return self._read().get(key)
@@ -161,8 +175,35 @@ def _is_writable(path: Path) -> bool:
 
 
 def _build_auth_storage():
-    """Use session-scoped storage to avoid cross-user leakage on shared hosts."""
+    """Use namespaced file storage when possible; otherwise use session storage."""
+    namespace = _client_storage_namespace()
+    if _is_writable(AUTH_STORAGE_FILE):
+        return FileAuthStorage(AUTH_STORAGE_FILE, namespace)
+    if _is_writable(AUTH_STORAGE_FILE_FALLBACK):
+        return FileAuthStorage(AUTH_STORAGE_FILE_FALLBACK, namespace)
     return SessionStateAuthStorage()
+
+
+def _client_storage_namespace() -> str:
+    """Build a stable per-client namespace from request headers."""
+    try:
+        headers = getattr(st.context, "headers", {})
+        # Cookie/session identifiers can rotate during OAuth redirects.
+        # Exclude them so the namespace remains stable pre/post callback.
+        user_agent = str(headers.get("user-agent") or "")
+        forwarded_for = (
+            str(headers.get("cf-connecting-ip") or "")
+            or str(headers.get("x-real-ip") or "")
+            or str(headers.get("x-forwarded-for") or "")
+        )
+        accept_lang = str(headers.get("accept-language") or "")
+        host = str(headers.get("host") or "")
+        raw = "|".join([user_agent, forwarded_for, accept_lang, host])
+        if not raw.strip("|"):
+            return "default"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+    except Exception:
+        return "default"
 
 
 def _resolve_oauth_redirect_url() -> str:
