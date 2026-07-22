@@ -339,6 +339,17 @@ def auth_ui():
             except Exception:
                 pass
 
+            err_text = str(e)
+            if "both auth code and code verifier should be non-empty" in err_text.lower():
+                # PKCE verifier is no longer available (expired callback/reload).
+                # Reset callback state and send user back to a fresh OAuth start.
+                st.session_state.pop("oauth_url", None)
+                st.session_state.pop("oauth_redirect_to", None)
+                st.session_state.show_auth_form = True
+                st.query_params.clear()
+                st.warning("Login link expired. Tap Google sign-in again.")
+                return None
+
             st.error(f"Login attempt failed: {str(e)}")
             st.session_state.pop("oauth_url", None)
             st.query_params.clear()
