@@ -72,6 +72,7 @@ if "your_anon_key_here" in SUPABASE_ANON_KEY.lower():
 BASE_DIR = Path(__file__).resolve().parent
 AUTH_STORAGE_FILE = BASE_DIR / ".streamlit" / "supabase_auth_storage.json"
 AUTH_STORAGE_FILE_FALLBACK = Path(tempfile.gettempdir()) / "flex_budget_app_supabase_auth_storage.json"
+AUTH_SESSION_KEY = "flex_budget_auth_session"
 
 
 class MemoryAuthStorage:
@@ -187,6 +188,12 @@ def _build_auth_storage():
     return SessionStateAuthStorage()
 
 
+def _get_auth_storage():
+    if "_supabase_auth_storage" not in st.session_state:
+        st.session_state._supabase_auth_storage = _build_auth_storage()
+    return st.session_state._supabase_auth_storage
+
+
 def _client_storage_namespace() -> str:
     """Build a stable per-client namespace from request headers."""
     try:
@@ -252,7 +259,7 @@ def app_today() -> date:
 # Initialize Supabase client with session-scoped storage backend.
 def get_supabase_client() -> Client:
     if "_supabase_client" not in st.session_state:
-        storage = _build_auth_storage()
+        storage = _get_auth_storage()
         st.session_state._supabase_client = create_client(
             SUPABASE_URL,
             SUPABASE_ANON_KEY,
@@ -265,6 +272,83 @@ def get_supabase_client() -> Client:
 
 
 supabase: Client = get_supabase_client()
+
+
+def _persist_auth_session(session, user=None) -> None:
+    """Persist a minimal auth snapshot so email/password login survives refresh."""
+    if isinstance(session, dict):
+        access_token = session.get("access_token")
+        refresh_token = session.get("refresh_token")
+        session_user = None
+    else:
+        access_token = getattr(session, "access_token", None) if session else None
+        refresh_token = getattr(session, "refresh_token", None) if session else None
+        session_user = getattr(session, "user", None) if session else None
+
+    if not access_token or not refresh_token:
+        _clear_persisted_auth_session()
+        return
+
+    snapshot = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "user_id": getattr(user or session_user, "id", None),
+    }
+    _get_auth_storage().set_item(AUTH_SESSION_KEY, snapshot)
+
+
+def _clear_persisted_auth_session() -> None:
+    _get_auth_storage().remove_item(AUTH_SESSION_KEY)
+
+
+def _restore_persisted_auth_session():
+    """Restore a persisted auth session from Supabase or our explicit snapshot."""
+    try:
+        session_response = supabase.auth.get_session()
+        session = getattr(session_response, "session", None)
+        if session and getattr(session, "access_token", None):
+            access_token = session.access_token
+            refresh_token = getattr(session, "refresh_token", None)
+            if refresh_token:
+                supabase.auth.set_session(access_token, refresh_token)
+
+            user = getattr(session, "user", None)
+            if not user and access_token:
+                user_response = supabase.auth.get_user(access_token)
+                user = getattr(user_response, "user", None)
+
+            if user:
+                _persist_auth_session(session, user)
+                return user, access_token
+    except Exception:
+        pass
+
+    try:
+        snapshot = _get_auth_storage().get_item(AUTH_SESSION_KEY)
+        if not isinstance(snapshot, dict):
+            return None, None
+
+        access_token = snapshot.get("access_token")
+        refresh_token = snapshot.get("refresh_token")
+        if not access_token or not refresh_token:
+            _clear_persisted_auth_session()
+            return None, None
+
+        supabase.auth.set_session(access_token, refresh_token)
+        refreshed_session = getattr(supabase.auth.get_session(), "session", None)
+        active_access_token = getattr(refreshed_session, "access_token", None) or access_token
+        user = getattr(refreshed_session, "user", None)
+        if not user:
+            user_response = supabase.auth.get_user(active_access_token)
+            user = getattr(user_response, "user", None)
+
+        if user:
+            _persist_auth_session(refreshed_session or snapshot, user)
+            return user, active_access_token
+    except Exception:
+        _clear_persisted_auth_session()
+
+    return None, None
 
 # Legacy paths (no longer used, but kept for reference)
 APP_DIR = Path(__file__).parent
@@ -292,28 +376,12 @@ def auth_ui():
         return st.session_state.user
 
     # Restore persisted Supabase session so browser refresh keeps users logged in.
-    try:
-        session_response = supabase.auth.get_session()
-        session = getattr(session_response, "session", None)
-        if session and getattr(session, "access_token", None):
-            access_token = session.access_token
-            refresh_token = getattr(session, "refresh_token", None)
-            if refresh_token:
-                supabase.auth.set_session(access_token, refresh_token)
-
-            user = getattr(session, "user", None)
-            if not user and access_token:
-                user_response = supabase.auth.get_user(access_token)
-                user = getattr(user_response, "user", None)
-
-            if user:
-                st.session_state.user = user
-                st.session_state.access_token = access_token
-                st.session_state.show_auth_form = False
-                return user
-    except Exception:
-        # If restore fails, continue to explicit login UI.
-        pass
+    user, access_token = _restore_persisted_auth_session()
+    if user:
+        st.session_state.user = user
+        st.session_state.access_token = access_token
+        st.session_state.show_auth_form = False
+        return user
 
     oauth_error = st.query_params.get("error")
     oauth_error_description = st.query_params.get("error_description")
@@ -386,6 +454,7 @@ def auth_ui():
                     st.session_state.access_token = response.session.access_token
                     # Set the session on the Supabase client so RLS works
                     supabase.auth.set_session(response.session.access_token, response.session.refresh_token)
+                    _persist_auth_session(response.session, response.user)
                     st.rerun()
                 except Exception as e:
                     st.error(f"Login attempt failed: {str(e)}")
@@ -407,6 +476,7 @@ def auth_ui():
                         st.session_state.access_token = response.session.access_token
                         # Set the session on the Supabase client so RLS works
                         supabase.auth.set_session(response.session.access_token, response.session.refresh_token)
+                        _persist_auth_session(response.session, response.user)
                     st.success("Account created! Log in with your credentials.")
                 except Exception as e:
                     st.error(f"Sign up failed: {str(e)}")
@@ -939,6 +1009,7 @@ def main() -> None:
         else:
             if st.button("Use Guest Mode", key="switch_to_guest"):
                 supabase.auth.sign_out()
+                _clear_persisted_auth_session()
                 st.session_state.user = None
                 st.session_state.access_token = None
                 st.session_state.guest_mode = True
@@ -948,6 +1019,7 @@ def main() -> None:
                 st.rerun()
             if st.button("Logout"):
                 supabase.auth.sign_out()
+                _clear_persisted_auth_session()
                 st.session_state.user = None
                 st.session_state.access_token = None
                 st.session_state.show_auth_form = False
