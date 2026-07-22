@@ -397,7 +397,7 @@ def get_supabase_client() -> Client:
             SUPABASE_URL,
             SUPABASE_ANON_KEY,
             options=ClientOptions(
-                flow_type="implicit",
+                flow_type="pkce",
                 storage=storage,
             ),
         )
