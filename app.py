@@ -11,10 +11,8 @@ import hashlib
 import json
 import operator
 import tempfile
-import time
 from datetime import date, datetime
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -74,8 +72,6 @@ if "your_anon_key_here" in SUPABASE_ANON_KEY.lower():
 BASE_DIR = Path(__file__).resolve().parent
 AUTH_STORAGE_FILE = BASE_DIR / ".streamlit" / "supabase_auth_storage.json"
 AUTH_STORAGE_FILE_FALLBACK = Path(tempfile.gettempdir()) / "flex_budget_app_supabase_auth_storage.json"
-OAUTH_STATE_MAP_FILE = BASE_DIR / ".streamlit" / "oauth_state_map.json"
-OAUTH_STATE_MAP_FILE_FALLBACK = Path(tempfile.gettempdir()) / "flex_budget_app_oauth_state_map.json"
 
 
 class MemoryAuthStorage:
@@ -213,142 +209,6 @@ def _client_storage_namespace() -> str:
         return "default"
 
 
-def _recover_pkce_store_from_files() -> bool:
-    """Best-effort recovery of PKCE verifier across namespace/client switches."""
-    storage_paths = [AUTH_STORAGE_FILE, AUTH_STORAGE_FILE_FALLBACK]
-    for path in storage_paths:
-        if not path.exists():
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-
-        candidate_stores: list[dict] = []
-        if isinstance(payload, dict):
-            # Legacy flat store format.
-            if any("code_verifier" in str(key) for key in payload.keys()):
-                candidate_stores.append(payload)
-
-            # Namespaced format where each value is a per-client store.
-            for value in payload.values():
-                if isinstance(value, dict) and any("code_verifier" in str(key) for key in value.keys()):
-                    candidate_stores.append(value)
-
-        if candidate_stores:
-            recovered: dict = {}
-            for store in candidate_stores:
-                recovered.update(store)
-            if recovered:
-                st.session_state._supabase_auth_store = recovered
-                return True
-
-    return False
-
-
-def _oauth_state_map_path() -> Path | None:
-    if _is_writable(OAUTH_STATE_MAP_FILE):
-        return OAUTH_STATE_MAP_FILE
-    if _is_writable(OAUTH_STATE_MAP_FILE_FALLBACK):
-        return OAUTH_STATE_MAP_FILE_FALLBACK
-    return None
-
-
-def _load_oauth_state_map() -> dict:
-    path = _oauth_state_map_path()
-    if not path or not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        return payload if isinstance(payload, dict) else {}
-    except Exception:
-        return {}
-
-
-def _save_oauth_state_map(state_map: dict) -> None:
-    path = _oauth_state_map_path()
-    if not path:
-        return
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(state_map), encoding="utf-8")
-    except Exception:
-        pass
-
-
-def _remember_oauth_state_namespace(state: str, namespace: str) -> None:
-    if not state or not namespace:
-        return
-    state_map = _load_oauth_state_map()
-    now = time.time()
-    state_map[state] = {"namespace": namespace, "created_at": now}
-    # Keep only recent state entries.
-    state_map = {
-        key: value
-        for key, value in state_map.items()
-        if isinstance(value, dict) and (now - float(value.get("created_at", 0.0) or 0.0)) <= 1200
-    }
-    _save_oauth_state_map(state_map)
-
-
-def _apply_oauth_state_namespace(state: str) -> bool:
-    """Load the storage namespace captured at OAuth start into current session."""
-    if not state:
-        return False
-
-    state_map = _load_oauth_state_map()
-    row = state_map.pop(state, None)
-    _save_oauth_state_map(state_map)
-    if not isinstance(row, dict):
-        return False
-
-    namespace = str(row.get("namespace") or "").strip()
-    if not namespace:
-        return False
-
-    storage_paths = [AUTH_STORAGE_FILE, AUTH_STORAGE_FILE_FALLBACK]
-    for path in storage_paths:
-        if not path.exists():
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if not isinstance(payload, dict):
-            continue
-
-        data = payload.get(namespace)
-        if isinstance(data, dict):
-            st.session_state._supabase_auth_store = data
-            return True
-
-    return False
-
-
-def _resolve_oauth_redirect_url() -> str:
-    """Build OAuth callback URL for current host, with secrets override support."""
-    configured = (
-        st.secrets.get("OAUTH_REDIRECT_URL")
-        or st.secrets.get("APP_REDIRECT_URL")
-        or (supabase_block.get("OAUTH_REDIRECT_URL") if isinstance(supabase_block, dict) else None)
-    )
-    if isinstance(configured, str) and configured.strip():
-        return configured.strip()
-
-    try:
-        headers = getattr(st.context, "headers", {})
-        host = (headers.get("x-forwarded-host") or headers.get("host") or "").strip()
-        proto = (headers.get("x-forwarded-proto") or "https").split(",")[0].strip()
-        if host:
-            if host.startswith("localhost") or host.startswith("127.0.0.1"):
-                proto = "http"
-            return f"{proto}://{host}"
-    except Exception:
-        pass
-
-    return "https://pb-flexbudget.streamlit.app"
-
-
 def app_today() -> date:
     """Return today's date using configured/app-local timezone.
 
@@ -423,8 +283,6 @@ def auth_ui():
         st.session_state.show_auth_form = False
     if "auth_notice" not in st.session_state:
         st.session_state.auth_notice = ""
-    if "oauth_force_refresh" not in st.session_state:
-        st.session_state.oauth_force_refresh = False
 
     if st.session_state.guest_mode:
         st.session_state.user = None
@@ -466,86 +324,6 @@ def auth_ui():
         )
         st.query_params.clear()
         st.rerun()
-
-    # Handle OAuth callback from Supabase (PKCE flow).
-    auth_code = st.query_params.get("code")
-    if auth_code:
-        # If user is already authenticated, ignore stale callback codes from refresh.
-        if st.session_state.get("user"):
-            st.query_params.clear()
-            st.rerun()
-
-        callback_state = str(st.query_params.get("state") or "").strip()
-        if callback_state:
-            _apply_oauth_state_namespace(callback_state)
-
-        try:
-            response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
-            if response and response.user:
-                st.session_state.user = response.user
-                st.session_state.access_token = response.session.access_token if response.session else None
-                # Set the session on the Supabase client so RLS works
-                if response.session:
-                    supabase.auth.set_session(response.session.access_token, response.session.refresh_token)
-                st.session_state.pop("oauth_url", None)
-                st.query_params.clear()
-                st.rerun()
-            else:
-                st.error("Login attempt failed: no user returned from Supabase callback.")
-                st.session_state.pop("oauth_url", None)
-                st.query_params.clear()
-        except Exception as e:
-            # A refresh can replay an already-consumed auth code; if a valid session exists,
-            # continue silently instead of surfacing a false login failure.
-            try:
-                session_response = supabase.auth.get_session()
-                session = getattr(session_response, "session", None)
-                if session and getattr(session, "user", None):
-                    st.session_state.user = session.user
-                    st.session_state.access_token = getattr(session, "access_token", None)
-                    st.session_state.pop("oauth_url", None)
-                    st.query_params.clear()
-                    st.rerun()
-            except Exception:
-                pass
-
-            err_text = str(e)
-            if "both auth code and code verifier should be non-empty" in err_text.lower():
-                # Try one recovery pass: restore PKCE verifier from stored namespace data
-                # and immediately retry the same auth code exchange.
-                if _recover_pkce_store_from_files():
-                    try:
-                        retry_response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
-                        if retry_response and retry_response.user:
-                            st.session_state.user = retry_response.user
-                            st.session_state.access_token = (
-                                retry_response.session.access_token if retry_response.session else None
-                            )
-                            if retry_response.session:
-                                supabase.auth.set_session(
-                                    retry_response.session.access_token,
-                                    retry_response.session.refresh_token,
-                                )
-                            st.session_state.pop("oauth_url", None)
-                            st.query_params.clear()
-                            st.rerun()
-                    except Exception:
-                        pass
-
-                # PKCE verifier is no longer available (expired callback/reload).
-                # Reset callback state and send user back to a fresh OAuth start.
-                st.session_state.pop("oauth_url", None)
-                st.session_state.pop("oauth_redirect_to", None)
-                st.session_state.pop("oauth_url_created_at", None)
-                st.session_state.oauth_force_refresh = True
-                st.session_state.show_auth_form = True
-                st.session_state.auth_notice = "Login link expired. Tap Google sign-in again."
-                st.query_params.clear()
-                st.rerun()
-
-            st.error(f"Login attempt failed: {str(e)}")
-            st.session_state.pop("oauth_url", None)
-            st.query_params.clear()
 
     st.markdown(
         """
@@ -590,7 +368,7 @@ def auth_ui():
     col_l, col_m, col_r = st.columns([1, 2, 1])
     with col_m:
         st.markdown("### Authentication")
-        auth_tab1, auth_tab2, auth_tab3 = st.tabs(["Login", "Sign Up", "Google"])
+        auth_tab1, auth_tab2 = st.tabs(["Login", "Sign Up"])
 
         with auth_tab1:
             email = st.text_input("Email", key="login_email")
@@ -632,40 +410,6 @@ def auth_ui():
                     st.success("Account created! Log in with your credentials.")
                 except Exception as e:
                     st.error(f"Sign up failed: {str(e)}")
-
-        with auth_tab3:
-            # Skip button rendering during callback (callback handler processes it above)
-            if not (st.query_params.get("code") or st.query_params.get("error")):
-                st.info("Click the button below to sign in with Google")
-                redirect_to = _resolve_oauth_redirect_url()
-
-                # Always generate a fresh OAuth URL to avoid stale PKCE links.
-                try:
-                    response = supabase.auth.sign_in_with_oauth(
-                        {
-                            "provider": "google",
-                            "options": {"redirect_to": redirect_to}
-                        }
-                    )
-                    st.session_state.oauth_url = response.url if (response and hasattr(response, "url")) else None
-                    namespace = str(st.session_state.get("_auth_storage_namespace") or "").strip()
-                    if st.session_state.oauth_url and namespace:
-                        parsed = urlparse(st.session_state.oauth_url)
-                        state_values = parse_qs(parsed.query).get("state", [])
-                        oauth_state = str(state_values[0]).strip() if state_values else ""
-                        if oauth_state:
-                            _remember_oauth_state_namespace(oauth_state, namespace)
-                    st.session_state.oauth_redirect_to = redirect_to
-                    st.session_state.oauth_url_created_at = time.time()
-                    st.session_state.oauth_force_refresh = False
-                except Exception as e:
-                    st.error(f"Google sign in error: {str(e)}")
-                
-                oauth_url = st.session_state.get("oauth_url")
-                if oauth_url:
-                    st.link_button("Sign In with Google", oauth_url, use_container_width=True)
-                else:
-                    st.error("Could not generate Google sign-in URL")
 
     return None
 WEEK_PERIODS = ["wk1", "wk2", "wk3", "wk4", "wk5"]
