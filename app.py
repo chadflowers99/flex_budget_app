@@ -206,6 +206,39 @@ def _client_storage_namespace() -> str:
         return "default"
 
 
+def _recover_pkce_store_from_files() -> bool:
+    """Best-effort recovery of PKCE verifier across namespace/client switches."""
+    storage_paths = [AUTH_STORAGE_FILE, AUTH_STORAGE_FILE_FALLBACK]
+    for path in storage_paths:
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        candidate_stores: list[dict] = []
+        if isinstance(payload, dict):
+            # Legacy flat store format.
+            if any("code_verifier" in str(key) for key in payload.keys()):
+                candidate_stores.append(payload)
+
+            # Namespaced format where each value is a per-client store.
+            for value in payload.values():
+                if isinstance(value, dict) and any("code_verifier" in str(key) for key in value.keys()):
+                    candidate_stores.append(value)
+
+        if candidate_stores:
+            recovered: dict = {}
+            for store in candidate_stores:
+                recovered.update(store)
+            if recovered:
+                st.session_state._supabase_auth_store = recovered
+                return True
+
+    return False
+
+
 def _resolve_oauth_redirect_url() -> str:
     """Build OAuth callback URL for current host, with secrets override support."""
     configured = (
@@ -388,6 +421,27 @@ def auth_ui():
 
             err_text = str(e)
             if "both auth code and code verifier should be non-empty" in err_text.lower():
+                # Try one recovery pass: restore PKCE verifier from stored namespace data
+                # and immediately retry the same auth code exchange.
+                if _recover_pkce_store_from_files():
+                    try:
+                        retry_response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
+                        if retry_response and retry_response.user:
+                            st.session_state.user = retry_response.user
+                            st.session_state.access_token = (
+                                retry_response.session.access_token if retry_response.session else None
+                            )
+                            if retry_response.session:
+                                supabase.auth.set_session(
+                                    retry_response.session.access_token,
+                                    retry_response.session.refresh_token,
+                                )
+                            st.session_state.pop("oauth_url", None)
+                            st.query_params.clear()
+                            st.rerun()
+                    except Exception:
+                        pass
+
                 # PKCE verifier is no longer available (expired callback/reload).
                 # Reset callback state and send user back to a fresh OAuth start.
                 st.session_state.pop("oauth_url", None)
