@@ -10,8 +10,9 @@ import calendar
 import json
 import operator
 import tempfile
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from supabase import create_client, Client
@@ -237,6 +238,21 @@ def _resolve_oauth_redirect_url() -> str:
         pass
 
     return "https://pb-flexbudget.streamlit.app"
+
+
+def app_today() -> date:
+    """Return today's date using configured/app-local timezone.
+
+    Optional override: set APP_TIMEZONE in Streamlit secrets (e.g. America/Chicago).
+    """
+    timezone_name = st.secrets.get("APP_TIMEZONE")
+    if isinstance(timezone_name, str) and timezone_name.strip():
+        try:
+            return datetime.now(ZoneInfo(timezone_name.strip())).date()
+        except Exception:
+            pass
+
+    return datetime.now().astimezone().date()
 
 
 # Initialize Supabase client with session-scoped storage backend.
@@ -1051,7 +1067,7 @@ def main() -> None:
     with calendar_col:
         st.subheader("Calendar")
         if "calendar_year" not in st.session_state or "calendar_month" not in st.session_state:
-            today = date.today()
+            today = app_today()
             st.session_state.calendar_year = today.year
             st.session_state.calendar_month = today.month
 
@@ -1068,7 +1084,7 @@ def main() -> None:
         month_df = pd.DataFrame(month_grid, columns=["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"])
         month_df = month_df.replace(0, "")
         month_df = month_df.astype(str)
-        calendar_today = date.today()
+        calendar_today = app_today()
         highlight_today = (
             st.session_state.calendar_year == calendar_today.year
             and st.session_state.calendar_month == calendar_today.month
