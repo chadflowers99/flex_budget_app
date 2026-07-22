@@ -14,6 +14,7 @@ import tempfile
 import time
 from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -73,6 +74,8 @@ if "your_anon_key_here" in SUPABASE_ANON_KEY.lower():
 BASE_DIR = Path(__file__).resolve().parent
 AUTH_STORAGE_FILE = BASE_DIR / ".streamlit" / "supabase_auth_storage.json"
 AUTH_STORAGE_FILE_FALLBACK = Path(tempfile.gettempdir()) / "flex_budget_app_supabase_auth_storage.json"
+OAUTH_STATE_MAP_FILE = BASE_DIR / ".streamlit" / "oauth_state_map.json"
+OAUTH_STATE_MAP_FILE_FALLBACK = Path(tempfile.gettempdir()) / "flex_budget_app_oauth_state_map.json"
 
 
 class MemoryAuthStorage:
@@ -177,10 +180,14 @@ def _is_writable(path: Path) -> bool:
 def _build_auth_storage():
     """Use namespaced file storage when possible; otherwise use session storage."""
     namespace = _client_storage_namespace()
+    st.session_state._auth_storage_namespace = namespace
     if _is_writable(AUTH_STORAGE_FILE):
+        st.session_state._auth_storage_persistent = True
         return FileAuthStorage(AUTH_STORAGE_FILE, namespace)
     if _is_writable(AUTH_STORAGE_FILE_FALLBACK):
+        st.session_state._auth_storage_persistent = True
         return FileAuthStorage(AUTH_STORAGE_FILE_FALLBACK, namespace)
+    st.session_state._auth_storage_persistent = False
     return SessionStateAuthStorage()
 
 
@@ -235,6 +242,85 @@ def _recover_pkce_store_from_files() -> bool:
             if recovered:
                 st.session_state._supabase_auth_store = recovered
                 return True
+
+    return False
+
+
+def _oauth_state_map_path() -> Path | None:
+    if _is_writable(OAUTH_STATE_MAP_FILE):
+        return OAUTH_STATE_MAP_FILE
+    if _is_writable(OAUTH_STATE_MAP_FILE_FALLBACK):
+        return OAUTH_STATE_MAP_FILE_FALLBACK
+    return None
+
+
+def _load_oauth_state_map() -> dict:
+    path = _oauth_state_map_path()
+    if not path or not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_oauth_state_map(state_map: dict) -> None:
+    path = _oauth_state_map_path()
+    if not path:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state_map), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _remember_oauth_state_namespace(state: str, namespace: str) -> None:
+    if not state or not namespace:
+        return
+    state_map = _load_oauth_state_map()
+    now = time.time()
+    state_map[state] = {"namespace": namespace, "created_at": now}
+    # Keep only recent state entries.
+    state_map = {
+        key: value
+        for key, value in state_map.items()
+        if isinstance(value, dict) and (now - float(value.get("created_at", 0.0) or 0.0)) <= 1200
+    }
+    _save_oauth_state_map(state_map)
+
+
+def _apply_oauth_state_namespace(state: str) -> bool:
+    """Load the storage namespace captured at OAuth start into current session."""
+    if not state:
+        return False
+
+    state_map = _load_oauth_state_map()
+    row = state_map.pop(state, None)
+    _save_oauth_state_map(state_map)
+    if not isinstance(row, dict):
+        return False
+
+    namespace = str(row.get("namespace") or "").strip()
+    if not namespace:
+        return False
+
+    storage_paths = [AUTH_STORAGE_FILE, AUTH_STORAGE_FILE_FALLBACK]
+    for path in storage_paths:
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+
+        data = payload.get(namespace)
+        if isinstance(data, dict):
+            st.session_state._supabase_auth_store = data
+            return True
 
     return False
 
@@ -388,6 +474,10 @@ def auth_ui():
         if st.session_state.get("user"):
             st.query_params.clear()
             st.rerun()
+
+        callback_state = str(st.query_params.get("state") or "").strip()
+        if callback_state:
+            _apply_oauth_state_namespace(callback_state)
 
         try:
             response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
@@ -567,6 +657,13 @@ def auth_ui():
                             }
                         )
                         st.session_state.oauth_url = response.url if (response and hasattr(response, "url")) else None
+                        namespace = str(st.session_state.get("_auth_storage_namespace") or "").strip()
+                        if st.session_state.oauth_url and namespace:
+                            parsed = urlparse(st.session_state.oauth_url)
+                            state_values = parse_qs(parsed.query).get("state", [])
+                            oauth_state = str(state_values[0]).strip() if state_values else ""
+                            if oauth_state:
+                                _remember_oauth_state_namespace(oauth_state, namespace)
                         st.session_state.oauth_redirect_to = redirect_to
                         st.session_state.oauth_url_created_at = time.time()
                         st.session_state.oauth_force_refresh = False
