@@ -6,18 +6,14 @@ import streamlit as st
 st.set_page_config(page_title="Portfolio brand.", layout="wide")
 
 import ast
-import base64
 import calendar
 import hashlib
 import json
 import operator
-import secrets
 import tempfile
 import time
 from datetime import date, datetime
 from pathlib import Path
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -77,8 +73,6 @@ if "your_anon_key_here" in SUPABASE_ANON_KEY.lower():
 BASE_DIR = Path(__file__).resolve().parent
 AUTH_STORAGE_FILE = BASE_DIR / ".streamlit" / "supabase_auth_storage.json"
 AUTH_STORAGE_FILE_FALLBACK = Path(tempfile.gettempdir()) / "flex_budget_app_supabase_auth_storage.json"
-OAUTH_STATE_FILE = BASE_DIR / ".streamlit" / "oauth_pkce_states.json"
-OAUTH_STATE_FILE_FALLBACK = Path(tempfile.gettempdir()) / "flex_budget_app_oauth_pkce_states.json"
 
 
 class MemoryAuthStorage:
@@ -245,100 +239,6 @@ def _recover_pkce_store_from_files() -> bool:
     return False
 
 
-def _oauth_state_path() -> Path | None:
-    if _is_writable(OAUTH_STATE_FILE):
-        return OAUTH_STATE_FILE
-    if _is_writable(OAUTH_STATE_FILE_FALLBACK):
-        return OAUTH_STATE_FILE_FALLBACK
-    return None
-
-
-def _load_oauth_state_map() -> dict:
-    path = _oauth_state_path()
-    if not path or not path.exists():
-        return {}
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        return payload if isinstance(payload, dict) else {}
-    except Exception:
-        return {}
-
-
-def _save_oauth_state_map(state_map: dict) -> None:
-    path = _oauth_state_path()
-    if not path:
-        return
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(state_map), encoding="utf-8")
-    except Exception:
-        pass
-
-
-def _pkce_challenge(verifier: str) -> str:
-    digest = hashlib.sha256(verifier.encode("utf-8")).digest()
-    return base64.urlsafe_b64encode(digest).decode("utf-8").rstrip("=")
-
-
-def _create_google_oauth_url(redirect_to: str) -> str:
-    verifier = secrets.token_urlsafe(64)
-    state = secrets.token_urlsafe(24)
-    challenge = _pkce_challenge(verifier)
-
-    state_map = _load_oauth_state_map()
-    state_map[state] = {"verifier": verifier, "created_at": time.time()}
-    # Keep store small and remove stale entries.
-    now = time.time()
-    state_map = {
-        key: value
-        for key, value in state_map.items()
-        if isinstance(value, dict) and (now - float(value.get("created_at", 0.0) or 0.0)) <= 900
-    }
-    _save_oauth_state_map(state_map)
-
-    params = {
-        "provider": "google",
-        "redirect_to": redirect_to,
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
-        "state": state,
-    }
-    return f"{SUPABASE_URL}/auth/v1/authorize?{urlencode(params)}"
-
-
-def _pop_pkce_verifier(state: str) -> str | None:
-    state_map = _load_oauth_state_map()
-    raw = state_map.pop(state, None)
-    _save_oauth_state_map(state_map)
-    if not isinstance(raw, dict):
-        return None
-    created_at = float(raw.get("created_at", 0.0) or 0.0)
-    if (time.time() - created_at) > 900:
-        return None
-    verifier = str(raw.get("verifier") or "").strip()
-    return verifier or None
-
-
-def _exchange_pkce_code(auth_code: str, state: str) -> dict:
-    verifier = _pop_pkce_verifier(state)
-    if not verifier:
-        raise ValueError("Missing or expired OAuth verifier state.")
-
-    token_url = f"{SUPABASE_URL}/auth/v1/token?grant_type=pkce"
-    payload = json.dumps({"auth_code": auth_code, "code_verifier": verifier}).encode("utf-8")
-    request = Request(
-        token_url,
-        data=payload,
-        headers={
-            "apikey": SUPABASE_ANON_KEY,
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    with urlopen(request, timeout=20) as response:
-        return json.loads(response.read().decode("utf-8"))
-
-
 def _resolve_oauth_redirect_url() -> str:
     """Build OAuth callback URL for current host, with secrets override support."""
     configured = (
@@ -488,37 +388,6 @@ def auth_ui():
         if st.session_state.get("user"):
             st.query_params.clear()
             st.rerun()
-
-        callback_state = str(st.query_params.get("state") or "").strip()
-        if callback_state:
-            try:
-                token_payload = _exchange_pkce_code(str(auth_code), callback_state)
-                access_token = str(token_payload.get("access_token") or "").strip()
-                refresh_token = str(token_payload.get("refresh_token") or "").strip()
-                if not access_token or not refresh_token:
-                    raise ValueError("OAuth token exchange returned empty tokens.")
-
-                supabase.auth.set_session(access_token, refresh_token)
-                user_response = supabase.auth.get_user(access_token)
-                user = getattr(user_response, "user", None)
-                if not user:
-                    raise ValueError("OAuth token exchange returned no user.")
-
-                st.session_state.user = user
-                st.session_state.access_token = access_token
-                st.session_state.show_auth_form = False
-                st.session_state.pop("oauth_url", None)
-                st.query_params.clear()
-                st.rerun()
-            except Exception as e:
-                st.session_state.pop("oauth_url", None)
-                st.session_state.pop("oauth_redirect_to", None)
-                st.session_state.pop("oauth_url_created_at", None)
-                st.session_state.oauth_force_refresh = True
-                st.session_state.show_auth_form = True
-                st.session_state.auth_notice = f"Login callback failed. Please try again. ({str(e)})"
-                st.query_params.clear()
-                st.rerun()
 
         try:
             response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
@@ -691,7 +560,13 @@ def auth_ui():
                 )
                 if should_refresh_oauth:
                     try:
-                        st.session_state.oauth_url = _create_google_oauth_url(redirect_to)
+                        response = supabase.auth.sign_in_with_oauth(
+                            {
+                                "provider": "google",
+                                "options": {"redirect_to": redirect_to}
+                            }
+                        )
+                        st.session_state.oauth_url = response.url if (response and hasattr(response, "url")) else None
                         st.session_state.oauth_redirect_to = redirect_to
                         st.session_state.oauth_url_created_at = time.time()
                         st.session_state.oauth_force_refresh = False
