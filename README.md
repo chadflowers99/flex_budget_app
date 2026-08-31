@@ -8,6 +8,7 @@ A multi-user Streamlit app for weekly budget planning with real-time Supabase sy
 - Real-time Supabase sync
 - Email/password and Google OAuth login
 - Multi-user access with RLS-backed data separation
+- Receipt uploads: attach an image/PDF to any bill via Supabase Storage
 
 ## Quick Start
 
@@ -24,7 +25,11 @@ A multi-user Streamlit app for weekly budget planning with real-time Supabase sy
    SUPABASE_ANON_KEY = "<your-anon-key>"
    ```
 
-3. Run locally:
+3. Run `supabase/receipts_migration.sql` in the Supabase SQL editor, and create
+   a private Storage bucket named `receipts` (Storage > New bucket, leave
+   "Public bucket" unchecked).
+
+4. Run locally:
 
    ```powershell
    streamlit run app.py

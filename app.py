@@ -10,6 +10,7 @@ import calendar
 import hashlib
 import json
 import operator
+import re
 import tempfile
 from datetime import date, datetime
 from pathlib import Path
@@ -614,6 +615,96 @@ def persist_to_supabase(user_id: str, bills_df: pd.DataFrame, bill_catalog: list
         st.error(f"Failed to save data: {str(e)}")
 
 
+RECEIPTS_BUCKET = "receipts"
+
+
+def _receipt_storage_path(user_id: str, period: str, bill_name: str, file_name: str) -> str:
+    """Build a stable storage path so re-uploads overwrite the prior receipt for a bill."""
+    ext = Path(file_name).suffix.lower() or ".bin"
+    safe_period = re.sub(r"[^a-z0-9_-]+", "_", normalize_period(period).strip().lower()) or "period"
+    safe_bill = re.sub(r"[^a-z0-9_-]+", "_", bill_name.strip().lower()) or "bill"
+    return f"{user_id}/{safe_period}/{safe_bill}{ext}"
+
+
+def load_receipts_from_supabase(user_id: str) -> dict[tuple[str, str], dict]:
+    """Load all receipt metadata for the user, keyed by (period, bill)."""
+    if not user_id:
+        return {}
+    try:
+        response = (
+            supabase.table("receipts")
+            .select("period, bill, storage_path, file_name, uploaded_at")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        return {
+            (normalize_period(row["period"]), str(row["bill"])): row
+            for row in (response.data or [])
+        }
+    except Exception as e:
+        st.warning(f"Failed to load receipts: {str(e)}")
+        return {}
+
+
+def upload_receipt(user_id: str, period: str, bill_name: str, uploaded_file) -> None:
+    """Upload a receipt file to Supabase Storage and upsert its metadata row."""
+    storage_path = _receipt_storage_path(user_id, period, bill_name, uploaded_file.name)
+    file_bytes = uploaded_file.getvalue()
+    supabase.storage.from_(RECEIPTS_BUCKET).upload(
+        storage_path,
+        file_bytes,
+        file_options={"content-type": uploaded_file.type or "application/octet-stream", "upsert": "true"},
+    )
+    supabase.table("receipts").upsert(
+        {
+            "user_id": user_id,
+            "period": period,
+            "bill": bill_name,
+            "storage_path": storage_path,
+            "file_name": uploaded_file.name,
+        },
+        on_conflict="user_id,period,bill",
+    ).execute()
+
+
+def get_receipt_signed_url(storage_path: str, expires_in: int = 3600) -> str | None:
+    """Return a short-lived signed URL for viewing a private receipt object."""
+    try:
+        result = supabase.storage.from_(RECEIPTS_BUCKET).create_signed_url(storage_path, expires_in)
+        return result.get("signedURL") or result.get("signed_url")
+    except Exception:
+        return None
+
+
+def render_receipt_control(user_id: str, period: str, bill_name: str) -> None:
+    """Compact upload/view control showing whether a bill has an attached receipt."""
+    if not user_id:
+        st.caption("—")
+        return
+    receipts = st.session_state.get("receipts", {})
+    receipt = receipts.get((normalize_period(period), bill_name))
+    with st.popover("🧾✅" if receipt else "🧾", use_container_width=False):
+        if receipt:
+            signed_url = get_receipt_signed_url(receipt["storage_path"])
+            if signed_url:
+                st.markdown(f"[View receipt]({signed_url})")
+            st.caption(f"On file: {receipt.get('file_name', '')}")
+        uploaded_file = st.file_uploader(
+            "Upload receipt",
+            type=["png", "jpg", "jpeg", "pdf"],
+            key=f"receipt_upload_{period}_{bill_name}",
+            label_visibility="collapsed",
+        )
+        if uploaded_file is not None:
+            try:
+                upload_receipt(user_id, period, bill_name, uploaded_file)
+                st.session_state.pop("receipts", None)
+                st.success("Receipt saved.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to upload receipt: {str(e)}")
+
+
 def load_table(path: Path, default_df: pd.DataFrame) -> pd.DataFrame:
     """Legacy function for backward compatibility."""
     if path.exists():
@@ -888,6 +979,7 @@ def main() -> None:
             "cash_flow_by_period",
             "cash_flow_expressions",
             "monthly_overview_week_enabled",
+            "receipts",
         ]:
             st.session_state.pop(key, None)
 
@@ -1111,11 +1203,14 @@ def main() -> None:
             st.session_state.cash_flow_by_period = {period: 0.0 for period in WEEK_PERIODS}
             # Keep expressions in session state only (not persisted to DB)
             st.session_state.cash_flow_expressions = {period: "" for period in WEEK_PERIODS}
+            st.session_state.receipts = {}
             st.session_state._guest_seeded = True
     else:
         st.session_state.pop("_guest_seeded", None)
         if "bills" not in st.session_state:
             st.session_state.bills = migrate_periods_to_weeks(clean_bills(load_bills_from_supabase(user_id)))
+        if "receipts" not in st.session_state:
+            st.session_state.receipts = load_receipts_from_supabase(user_id)
         if "periods_order" not in st.session_state:
             st.session_state.periods_order = WEEK_PERIODS.copy()
         if "bill_catalog" not in st.session_state:
@@ -1260,7 +1355,7 @@ def main() -> None:
                     if amount_key not in st.session_state:
                         st.session_state[amount_key] = f"{default_amount:.2f}"
 
-                    name_col, amount_col = st.columns([2, 3])
+                    name_col, amount_col, receipt_col = st.columns([2, 3, 1])
                     with name_col:
                         if st.button(
                             bill_name,
@@ -1282,6 +1377,8 @@ def main() -> None:
                             label_visibility="collapsed",
                             placeholder="0.00",
                         )
+                    with receipt_col:
+                        render_receipt_control(user_id, period, bill_name)
                     period_entries.append({"bill": bill_name, "amount": parse_numeric_text(amount_value)})
 
             edited_period = pd.DataFrame(period_entries, columns=["bill", "amount"])
