@@ -217,6 +217,30 @@ def _client_storage_namespace() -> str:
         return "default"
 
 
+def _resolve_oauth_redirect_url() -> str:
+    """Return the configured OAuth callback URL or derive it from the request."""
+    configured = (
+        st.secrets.get("OAUTH_REDIRECT_URL")
+        or st.secrets.get("APP_REDIRECT_URL")
+        or supabase_block.get("OAUTH_REDIRECT_URL")
+    )
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+
+    try:
+        headers = getattr(st.context, "headers", {})
+        host = str(headers.get("x-forwarded-host") or headers.get("host") or "").strip()
+        protocol = str(headers.get("x-forwarded-proto") or "https").split(",")[0].strip()
+        if host:
+            if host.startswith("localhost") or host.startswith("127.0.0.1"):
+                protocol = "http"
+            return f"{protocol}://{host}"
+    except Exception:
+        pass
+
+    return "https://pb-flexbudget.streamlit.app"
+
+
 def app_today() -> date:
     """Return today's date using configured/app-local timezone.
 
@@ -394,6 +418,27 @@ def auth_ui():
         st.query_params.clear()
         st.rerun()
 
+    auth_code = st.query_params.get("code")
+    if auth_code:
+        try:
+            response = supabase.auth.exchange_code_for_session({"auth_code": auth_code})
+            if not response.user or not response.session:
+                raise RuntimeError("No user session returned from the Google callback.")
+            st.session_state.user = response.user
+            st.session_state.access_token = response.session.access_token
+            supabase.auth.set_session(response.session.access_token, response.session.refresh_token)
+            _persist_auth_session(response.session, response.user)
+            st.session_state.pop("oauth_url", None)
+            st.session_state.pop("oauth_redirect_to", None)
+            st.query_params.clear()
+            st.rerun()
+        except Exception as e:
+            st.session_state.auth_notice = f"Google sign-in failed: {str(e)}"
+            st.session_state.pop("oauth_url", None)
+            st.session_state.pop("oauth_redirect_to", None)
+            st.query_params.clear()
+            st.rerun()
+
     st.markdown(
         """
         <div style="text-align: center;">
@@ -437,7 +482,7 @@ def auth_ui():
     col_l, col_m, col_r = st.columns([1, 2, 1])
     with col_m:
         st.markdown("### Authentication")
-        auth_tab1, auth_tab2 = st.tabs(["Login", "Sign Up"])
+        auth_tab1, auth_tab2, auth_tab3 = st.tabs(["Login", "Sign Up", "Google"])
 
         with auth_tab1:
             email = st.text_input("Email", key="login_email")
@@ -481,6 +526,28 @@ def auth_ui():
                     st.success("Account created! Log in with your credentials.")
                 except Exception as e:
                     st.error(f"Sign up failed: {str(e)}")
+
+        with auth_tab3:
+            redirect_to = _resolve_oauth_redirect_url()
+            should_refresh_oauth = (
+                "oauth_url" not in st.session_state
+                or st.session_state.get("oauth_redirect_to") != redirect_to
+            )
+            if should_refresh_oauth:
+                try:
+                    response = supabase.auth.sign_in_with_oauth(
+                        {"provider": "google", "options": {"redirect_to": redirect_to}}
+                    )
+                    st.session_state.oauth_url = response.url
+                    st.session_state.oauth_redirect_to = redirect_to
+                except Exception as e:
+                    st.error(f"Could not start Google sign-in: {str(e)}")
+
+            oauth_url = st.session_state.get("oauth_url")
+            if oauth_url:
+                st.link_button("Sign in with Google", oauth_url, use_container_width=True)
+            else:
+                st.error("Could not generate the Google sign-in link.")
 
     return None
 WEEK_PERIODS = ["wk1", "wk2", "wk3", "wk4", "wk5"]
@@ -676,6 +743,19 @@ def get_receipt_signed_url(storage_path: str, expires_in: int = 3600) -> str | N
         return None
 
 
+def delete_receipt(user_id: str, period: str, bill_name: str, storage_path: str) -> None:
+    """Delete a receipt object and its metadata row for the current user."""
+    supabase.storage.from_(RECEIPTS_BUCKET).remove([storage_path])
+    (
+        supabase.table("receipts")
+        .delete()
+        .eq("user_id", user_id)
+        .eq("period", period)
+        .eq("bill", bill_name)
+        .execute()
+    )
+
+
 def render_receipt_control(user_id: str, period: str, bill_name: str) -> None:
     """Compact upload/view control showing whether a bill has an attached receipt."""
     if not user_id:
@@ -689,6 +769,14 @@ def render_receipt_control(user_id: str, period: str, bill_name: str) -> None:
             if signed_url:
                 st.markdown(f"[View receipt]({signed_url})")
             st.caption(f"On file: {receipt.get('file_name', '')}")
+            if st.button("Delete receipt", key=f"delete_receipt_{period}_{bill_name}"):
+                try:
+                    delete_receipt(user_id, period, bill_name, receipt["storage_path"])
+                    st.session_state.pop("receipts", None)
+                    st.session_state.pop(f"receipt_upload_{period}_{bill_name}", None)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to delete receipt: {str(e)}")
         uploaded_file = st.file_uploader(
             "Upload receipt",
             type=["png", "jpg", "jpeg", "pdf"],
