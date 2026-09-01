@@ -199,17 +199,12 @@ def _client_storage_namespace() -> str:
     """Build a stable per-client namespace from request headers."""
     try:
         headers = getattr(st.context, "headers", {})
-        # Cookie/session identifiers can rotate during OAuth redirects.
-        # Exclude them so the namespace remains stable pre/post callback.
+        # Do not use IP forwarding headers: mobile networks can change them
+        # while the user completes an external OAuth redirect.
         user_agent = str(headers.get("user-agent") or "")
-        forwarded_for = (
-            str(headers.get("cf-connecting-ip") or "")
-            or str(headers.get("x-real-ip") or "")
-            or str(headers.get("x-forwarded-for") or "")
-        )
         accept_lang = str(headers.get("accept-language") or "")
         host = str(headers.get("host") or "")
-        raw = "|".join([user_agent, forwarded_for, accept_lang, host])
+        raw = "|".join([user_agent, accept_lang, host])
         if not raw.strip("|"):
             return "default"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
