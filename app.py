@@ -677,6 +677,23 @@ def persist_to_supabase(user_id: str, bills_df: pd.DataFrame, bill_catalog: list
         st.error(f"Failed to save data: {str(e)}")
 
 
+def _bills_snapshot_fingerprint(
+    bills_df: pd.DataFrame, bill_catalog: list[str], cash_flow_by_period: dict[str, float]
+) -> str:
+    """Fingerprint of persistable state, used to skip redundant Supabase writes on unrelated reruns."""
+    bills_key = tuple(
+        sorted(
+            (str(row.period), str(row.bill), round(float(row.amount), 2))
+            for row in bills_df.itertuples(index=False)
+        )
+    )
+    catalog_key = tuple(ensure_bill_catalog(bill_catalog))
+    cash_flow_key = tuple(
+        (period, round(float(cash_flow_by_period.get(period, 0.0)), 2)) for period in WEEK_PERIODS
+    )
+    return repr((bills_key, catalog_key, cash_flow_key))
+
+
 RECEIPTS_BUCKET = "receipts"
 
 
@@ -1063,6 +1080,7 @@ def main() -> None:
             "cash_flow_expressions",
             "monthly_overview_week_enabled",
             "receipts",
+            "_last_persisted_snapshot",
         ]:
             st.session_state.pop(key, None)
 
@@ -1541,7 +1559,12 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
-    persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
+    current_snapshot = _bills_snapshot_fingerprint(
+        st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period
+    )
+    if current_snapshot != st.session_state.get("_last_persisted_snapshot"):
+        persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
+        st.session_state._last_persisted_snapshot = current_snapshot
 
     st.session_state.periods_order = WEEK_PERIODS.copy()
 
