@@ -781,6 +781,8 @@ def render_receipt_control(user_id: str, period: str, bill_name: str) -> None:
     if not user_id:
         st.caption("—")
         return
+    upload_key = f"receipt_upload_{period}_{bill_name}"
+    upload_fingerprint_key = f"receipt_upload_fingerprint_{period}_{bill_name}"
     receipts = st.session_state.get("receipts", {})
     receipt = receipts.get((normalize_period(period), bill_name))
     with st.popover("🧾✅" if receipt else "🧾", use_container_width=False):
@@ -793,24 +795,27 @@ def render_receipt_control(user_id: str, period: str, bill_name: str) -> None:
                 try:
                     delete_receipt(user_id, period, bill_name, receipt["storage_path"])
                     st.session_state.pop("receipts", None)
-                    st.session_state.pop(f"receipt_upload_{period}_{bill_name}", None)
+                    st.session_state.pop(upload_key, None)
+                    st.session_state.pop(upload_fingerprint_key, None)
                     st.rerun()
                 except Exception as e:
                     st.error(f"Failed to delete receipt: {str(e)}")
         uploaded_file = st.file_uploader(
             "Upload receipt",
             type=["png", "jpg", "jpeg", "pdf"],
-            key=f"receipt_upload_{period}_{bill_name}",
+            key=upload_key,
             label_visibility="collapsed",
         )
         if uploaded_file is not None:
-            try:
-                upload_receipt(user_id, period, bill_name, uploaded_file)
-                st.session_state.pop("receipts", None)
-                st.success("Receipt saved.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Failed to upload receipt: {str(e)}")
+            upload_fingerprint = hashlib.sha256(uploaded_file.getvalue()).hexdigest()
+            if st.session_state.get(upload_fingerprint_key) != upload_fingerprint:
+                try:
+                    upload_receipt(user_id, period, bill_name, uploaded_file)
+                    st.session_state[upload_fingerprint_key] = upload_fingerprint
+                    st.session_state.pop("receipts", None)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to upload receipt: {str(e)}")
 
 
 def load_table(path: Path, default_df: pd.DataFrame) -> pd.DataFrame:
