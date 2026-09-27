@@ -801,6 +801,10 @@ def render_receipt_control(user_id: str, period: str, bill_name: str) -> None:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Failed to delete receipt: {str(e)}")
+        if st.button("Reset file picker", key=f"reset_receipt_picker_{period}_{bill_name}"):
+            st.session_state.pop(upload_key, None)
+            st.session_state[upload_version_key] += 1
+            st.rerun()
         uploaded_file = st.file_uploader(
             "Upload receipt",
             type=["png", "jpg", "jpeg", "pdf"],
