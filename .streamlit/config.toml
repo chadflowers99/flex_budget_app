@@ -2,3 +2,4 @@
 # Work around intermittent Streamlit Cloud crashes in some Linux/Python combos.
 fileWatcherType = "none"
 disconnectedSessionTTL = 3600
+websocketPingInterval = 20
