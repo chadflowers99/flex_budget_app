@@ -7,6 +7,7 @@ st.set_page_config(page_title="Portfolio brand.", layout="wide")
 
 import ast
 import calendar
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import operator
@@ -655,34 +656,87 @@ def load_cash_flow_from_supabase(user_id: str) -> dict[str, float]:
         return defaults
 
 
-def persist_to_supabase(user_id: str, bills_df: pd.DataFrame, bill_catalog: list[str], cash_flow_by_period: dict[str, float]) -> None:
+def persist_to_supabase(
+    user_id: str,
+    bills_df: pd.DataFrame,
+    bill_catalog: list[str],
+    cash_flow_by_period: dict[str, float],
+    client: Client | None = None,
+    report_errors: bool = True,
+) -> bool:
     """Save all data to Supabase for the authenticated user."""
     if not user_id:
-        return
+        return False
+    client = client or supabase
     try:
         # Fully sync bills so removed rows do not reappear on next load.
-        supabase.table("bills").delete().eq("user_id", user_id).execute()
+        client.table("bills").delete().eq("user_id", user_id).execute()
         if not bills_df.empty:
             bills_list = bills_df.to_dict(orient="records")
             for bill in bills_list:
                 bill["user_id"] = user_id
-            supabase.table("bills").insert(bills_list).execute()
+            client.table("bills").insert(bills_list).execute()
 
         # Fully sync bill catalog so deletions persist.
-        supabase.table("bill_catalog").delete().eq("user_id", user_id).execute()
+        client.table("bill_catalog").delete().eq("user_id", user_id).execute()
         catalog_values = ensure_bill_catalog(bill_catalog)
         if catalog_values:
             catalog_list = [{"user_id": user_id, "bill": bill} for bill in catalog_values]
-            supabase.table("bill_catalog").insert(catalog_list).execute()
+            client.table("bill_catalog").insert(catalog_list).execute()
 
         # Upsert cash flow (numeric values only).
         cashflow_list = [
             {"user_id": user_id, "period": period, "cash_flow": float(cash_flow_by_period.get(period, 0.0))}
             for period in WEEK_PERIODS
         ]
-        supabase.table("cash_flow").upsert(cashflow_list, on_conflict="user_id,period").execute()
+        client.table("cash_flow").upsert(cashflow_list, on_conflict="user_id,period").execute()
+        return True
     except Exception as e:
-        st.error(f"Failed to save data: {str(e)}")
+        if report_errors:
+            st.error(f"Failed to save data: {str(e)}")
+        return False
+
+
+@st.cache_resource
+def _get_background_persistence_resources() -> tuple[ThreadPoolExecutor, Client]:
+    client = create_client(
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY,
+        options=ClientOptions(
+            auto_refresh_token=False,
+            persist_session=False,
+            storage=MemoryAuthStorage(),
+        ),
+    )
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="flex-budget-save"), client
+
+
+def _persist_snapshot_in_background(
+    client: Client,
+    access_token: str,
+    user_id: str,
+    bills_df: pd.DataFrame,
+    bill_catalog: list[str],
+    cash_flow_by_period: dict[str, float],
+) -> bool:
+    client.postgrest.auth(access_token)
+    if persist_to_supabase(
+        user_id,
+        bills_df,
+        bill_catalog,
+        cash_flow_by_period,
+        client=client,
+        report_errors=False,
+    ):
+        return True
+    return persist_to_supabase(
+        user_id,
+        bills_df,
+        bill_catalog,
+        cash_flow_by_period,
+        client=client,
+        report_errors=False,
+    )
 
 
 def _bills_snapshot_fingerprint(
@@ -1072,6 +1126,166 @@ def safe_eval_expression(expr: str) -> float:
     return float(_eval(parsed))
 
 
+@st.fragment
+def render_week_budget_calculations(
+    user_id: str,
+    period: str,
+    period_label: str,
+    selected_bills: list[str],
+    monthly_overview_placeholder,
+) -> None:
+    period_entries: list[dict[str, float | str]] = []
+    delete_select_key = f"delete_bill_choice_{period}"
+    confirm_delete_key = f"confirm_delete_{period}"
+    for bill_name in selected_bills:
+        amount_key = f"amount_input_{period}_{bill_name}"
+        default_amount = float(st.session_state.period_amount_cache[period].get(bill_name, 0.0))
+        if amount_key not in st.session_state:
+            st.session_state[amount_key] = f"{default_amount:.2f}"
+
+        name_col, amount_col, receipt_col = st.columns([2, 3, 1])
+        with name_col:
+            if st.button(
+                bill_name,
+                key=f"select_bill_{period}_{bill_name}",
+                type="primary" if st.session_state.get(delete_select_key) == bill_name else "secondary",
+                use_container_width=False,
+            ):
+                if st.session_state.get(delete_select_key) == bill_name:
+                    st.session_state.pop(delete_select_key, None)
+                else:
+                    st.session_state[delete_select_key] = bill_name
+                st.session_state.pop(confirm_delete_key, None)
+                st.rerun()
+        with amount_col:
+            amount_value = st.text_input(
+                f"{bill_name} amount",
+                key=amount_key,
+                label_visibility="collapsed",
+                placeholder="0.00",
+            )
+        period_entries.append({"bill": bill_name, "amount": parse_numeric_text(amount_value)})
+        with receipt_col:
+            render_receipt_control(user_id, period, bill_name)
+
+    cash_flow_expr_key = f"cash_flow_expr_{period}"
+    period_cash_flow = st.text_input(
+        "Enter cash flow",
+        value=st.session_state.cash_flow_expressions.get(period, ""),
+        key=cash_flow_expr_key,
+        placeholder="0.00",
+    )
+    st.session_state.cash_flow_expressions[period] = period_cash_flow
+    st.session_state.cash_flow_by_period[period] = parse_numeric_text(period_cash_flow, allow_expression=True)
+
+    edited_period = pd.DataFrame(period_entries, columns=["bill", "amount"])
+    cleaned_period = clean_period_bills(edited_period, period)
+    st.session_state.period_amount_cache[period] = {
+        str(row.bill): float(row.amount) for row in cleaned_period.itertuples(index=False)
+    }
+
+    other_periods = st.session_state.bills[st.session_state.bills["period"] != period]
+    st.session_state.bills = clean_bills(pd.concat([other_periods, cleaned_period], ignore_index=True))
+    st.session_state.bill_catalog = ensure_bill_catalog(
+        st.session_state.bill_catalog + st.session_state.bills["bill"].astype(str).tolist()
+    )
+
+    period_total = float(pd.to_numeric(cleaned_period["amount"], errors="coerce").fillna(0.0).sum())
+    period_cash_flow_value = float(st.session_state.cash_flow_by_period.get(period, 0.0))
+    period_remaining = period_cash_flow_value - period_total
+    cue_color = "#15803d" if period_remaining >= 0 else "#b91c1c"
+    cue_text = "positive" if period_remaining >= 0 else "negative"
+
+    total_col, net_col = st.columns(2)
+    with total_col:
+        st.markdown(
+            f"<div style='font-size:0.78rem;color:#6b7280;font-weight:600;'>Total bills for {period_label}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div style='font-size:1.05rem;font-weight:600;'>${period_total:,.2f}</div>",
+            unsafe_allow_html=True,
+        )
+    with net_col:
+        st.markdown(
+            f"<div style='font-size:1.02rem;font-weight:700;'>Net cash flow for {period_label}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div style='font-size:0.8rem;color:{cue_color};font-weight:600;'>Net cue: {cue_text}</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div style='font-size:1.6rem;font-weight:800;'>${period_remaining:,.2f}</div>",
+            unsafe_allow_html=True,
+        )
+
+    pending_future = st.session_state.get("_pending_persist_future")
+    pending_snapshot = st.session_state.get("_pending_persist_snapshot")
+    if pending_future and pending_future.done():
+        try:
+            if pending_future.result():
+                st.session_state._last_persisted_snapshot = pending_snapshot
+            else:
+                st.error("Cloud save failed. The app will retry on the next edit.")
+        except Exception as e:
+            st.error(f"Cloud save failed: {str(e)}")
+        st.session_state.pop("_pending_persist_future", None)
+        st.session_state.pop("_pending_persist_snapshot", None)
+        pending_future = None
+        pending_snapshot = None
+
+    current_snapshot = _bills_snapshot_fingerprint(
+        st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period
+    )
+    last_snapshot = st.session_state.get("_last_persisted_snapshot")
+    comparison_snapshot = pending_snapshot if pending_future else last_snapshot
+    if user_id and current_snapshot != comparison_snapshot:
+        access_token = st.session_state.get("access_token")
+        if not access_token:
+            session = getattr(supabase.auth.get_session(), "session", None)
+            access_token = getattr(session, "access_token", None)
+        if not access_token:
+            st.error("Cloud save could not start. Please sign in again.")
+        else:
+            executor, worker_client = _get_background_persistence_resources()
+            st.session_state._pending_persist_snapshot = current_snapshot
+            st.session_state._pending_persist_future = executor.submit(
+                _persist_snapshot_in_background,
+                worker_client,
+                access_token,
+                user_id,
+                st.session_state.bills.copy(deep=True),
+                list(st.session_state.bill_catalog),
+                dict(st.session_state.cash_flow_by_period),
+            )
+
+    with monthly_overview_placeholder.container():
+        with st.expander("Monthly Overview", expanded=False):
+            st.caption("Combined totals for all weeks.")
+            monthly_bills_total = float(
+                pd.to_numeric(st.session_state.bills["amount"], errors="coerce").fillna(0.0).sum()
+            )
+            monthly_cash_flow_total = sum(
+                float(st.session_state.cash_flow_by_period.get(week, 0.0)) for week in WEEK_PERIODS
+            )
+            monthly_net = monthly_cash_flow_total - monthly_bills_total
+
+            monthly_bills_col, monthly_cash_col, monthly_net_col = st.columns(3)
+            monthly_bills_col.markdown(
+                f"<div style='font-size:0.72rem;color:#6b7280;'>Bills</div><div style='font-size:1rem;font-weight:600;'>${monthly_bills_total:,.2f}</div>",
+                unsafe_allow_html=True,
+            )
+            monthly_cash_col.markdown(
+                f"<div style='font-size:0.72rem;color:#6b7280;'>Cash flow</div><div style='font-size:1rem;font-weight:600;'>${monthly_cash_flow_total:,.2f}</div>",
+                unsafe_allow_html=True,
+            )
+            monthly_net_col.markdown(
+                f"<div style='font-size:0.72rem;color:#6b7280;'>Net</div><div style='font-size:1rem;font-weight:600;'>${monthly_net:,.2f}</div>",
+                unsafe_allow_html=True,
+            )
+
+
 def main() -> None:
     # Authenticate user first
     user = auth_ui()
@@ -1357,16 +1571,7 @@ def main() -> None:
         st.session_state.bill_catalog = bill_catalog
 
     bill_tabs = st.tabs([period_labels[period] for period in periods])
-    rebuilt_bills: list[pd.DataFrame] = []
-    period_totals: dict[str, float] = {
-        period: float(
-            pd.to_numeric(
-                st.session_state.bills[st.session_state.bills["period"] == period]["amount"],
-                errors="coerce",
-            ).fillna(0.0).sum()
-        )
-        for period in periods
-    }
+    monthly_overview_placeholder = st.empty()
     for i, period in enumerate(periods):
         with bill_tabs[i]:
             period_label = period_labels[period]
@@ -1464,123 +1669,13 @@ def main() -> None:
                 bill_name: float(cache_for_period.get(bill_name, 0.0)) for bill_name in selected_bills
             }
 
-            period_entries: list[dict[str, float | str]] = []
-            if selected_bills:
-                for idx, bill_name in enumerate(selected_bills):
-                    amount_key = f"amount_input_{period}_{bill_name}"
-                    default_amount = float(st.session_state.period_amount_cache[period].get(bill_name, 0.0))
-                    if amount_key not in st.session_state:
-                        st.session_state[amount_key] = f"{default_amount:.2f}"
-
-                    name_col, amount_col, receipt_col = st.columns([2, 3, 1])
-                    with name_col:
-                        if st.button(
-                            bill_name,
-                            key=f"select_bill_{period}_{bill_name}",
-                            type="primary" if st.session_state.get(delete_select_key) == bill_name else "secondary",
-                            use_container_width=False,
-                        ):
-                            if st.session_state.get(delete_select_key) == bill_name:
-                                st.session_state.pop(delete_select_key, None)
-                            else:
-                                st.session_state[delete_select_key] = bill_name
-                            st.session_state.pop(confirm_delete_key, None)
-                            st.rerun()
-
-                    with amount_col:
-                        amount_value = st.text_input(
-                            f"{bill_name} amount",
-                            key=amount_key,
-                            label_visibility="collapsed",
-                            placeholder="0.00",
-                        )
-                    with receipt_col:
-                        render_receipt_control(user_id, period, bill_name)
-                    period_entries.append({"bill": bill_name, "amount": parse_numeric_text(amount_value)})
-
-            edited_period = pd.DataFrame(period_entries, columns=["bill", "amount"])
-            cleaned_period = clean_period_bills(edited_period, period)
-            st.session_state.period_amount_cache[period] = {
-                str(row.bill): float(row.amount) for row in cleaned_period.itertuples(index=False)
-            }
-
-            period_total = float(pd.to_numeric(cleaned_period["amount"], errors="coerce").fillna(0.0).sum())
-            cash_flow_expr_key = f"cash_flow_expr_{period}"
-            period_cash_flow = st.text_input(
-                "Enter cash flow",
-                value=st.session_state.cash_flow_expressions.get(period, ""),
-                key=cash_flow_expr_key,
-                placeholder="0.00",
+            render_week_budget_calculations(
+                user_id,
+                period,
+                period_label,
+                selected_bills,
+                monthly_overview_placeholder,
             )
-            st.session_state.cash_flow_expressions[period] = period_cash_flow
-            period_cash_flow_value = parse_numeric_text(period_cash_flow, allow_expression=True)
-            st.session_state.cash_flow_by_period[period] = period_cash_flow_value
-            period_remaining = period_cash_flow_value - period_total
-            period_totals[period] = period_total
-
-            cue_color = "#15803d" if period_remaining >= 0 else "#b91c1c"
-            cue_text = "positive" if period_remaining >= 0 else "negative"
-
-            total_col, net_col = st.columns(2)
-            with total_col:
-                st.markdown(
-                    f"<div style='font-size:0.78rem;color:#6b7280;font-weight:600;'>Total bills for {period_label}</div>",
-                    unsafe_allow_html=True,
-                )
-                st.markdown(
-                    f"<div style='font-size:1.05rem;font-weight:600;'>${period_total:,.2f}</div>",
-                    unsafe_allow_html=True,
-                )
-            with net_col:
-                st.markdown(
-                    f"<div style='font-size:1.02rem;font-weight:700;'>Net cash flow for {period_label}</div>",
-                    unsafe_allow_html=True,
-                )
-                st.markdown(
-                    f"<div style='font-size:0.8rem;color:{cue_color};font-weight:600;'>Net cue: {cue_text}</div>",
-                    unsafe_allow_html=True,
-                )
-                st.markdown(
-                    f"<div style='font-size:1.6rem;font-weight:800;'>${period_remaining:,.2f}</div>",
-                    unsafe_allow_html=True,
-                )
-
-            rebuilt_bills.append(cleaned_period)
-
-    st.session_state.bills = clean_bills(
-        pd.concat(rebuilt_bills, ignore_index=True) if rebuilt_bills else pd.DataFrame(columns=["period", "bill", "amount"])
-    )
-    st.session_state.bill_catalog = ensure_bill_catalog(
-        bill_catalog + st.session_state.bills["bill"].astype(str).tolist()
-    )
-
-    with st.expander("Monthly Overview", expanded=False):
-        st.caption("Combined totals for all weeks.")
-
-        monthly_bills_total = sum(float(period_totals.get(period, 0.0)) for period in periods)
-        monthly_cash_flow_total = sum(float(st.session_state.cash_flow_by_period.get(period, 0.0)) for period in periods)
-        monthly_net = monthly_cash_flow_total - monthly_bills_total
-
-        monthly_bills_col, monthly_cash_col, monthly_net_col = st.columns(3)
-        monthly_bills_col.markdown(
-            f"<div style='font-size:0.72rem;color:#6b7280;'>Bills</div><div style='font-size:1rem;font-weight:600;'>${monthly_bills_total:,.2f}</div>",
-            unsafe_allow_html=True,
-        )
-        monthly_cash_col.markdown(
-            f"<div style='font-size:0.72rem;color:#6b7280;'>Cash flow</div><div style='font-size:1rem;font-weight:600;'>${monthly_cash_flow_total:,.2f}</div>",
-            unsafe_allow_html=True,
-        )
-        monthly_net_col.markdown(
-            f"<div style='font-size:0.72rem;color:#6b7280;'>Net</div><div style='font-size:1rem;font-weight:600;'>${monthly_net:,.2f}</div>",
-            unsafe_allow_html=True,
-        )
-
-    current_snapshot = _bills_snapshot_fingerprint(
-        st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period
-    )
-    if current_snapshot != st.session_state.get("_last_persisted_snapshot"):
-        persist_to_supabase(user_id, st.session_state.bills, st.session_state.bill_catalog, st.session_state.cash_flow_by_period)
-        st.session_state._last_persisted_snapshot = current_snapshot
 
     st.session_state.periods_order = WEEK_PERIODS.copy()
 
